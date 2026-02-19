@@ -71,3 +71,24 @@ export interface BatchPODResult {
   uploadQueue: string[];         // filenames ranked best to worst
   results: BatchDesignResult[];
 }
+
+export type CompetitionLevel = 'BLUE_OCEAN' | 'MODERATE' | 'SATURATED' | 'OVERCROWDED' | 'UNKNOWN';
+export type SlotDecisionVerdict = 'GO' | 'HOLD' | 'SKIP';
+export type UrgencyLevel = 'UPLOAD_TODAY' | 'UPLOAD_THIS_WEEK' | 'WAIT_FOR_SEASON' | 'SKIP';
+
+export interface CompetitionData {
+  level: CompetitionLevel;
+  estimatedListings: string;
+  searchTerm: string;
+  competitionScore: number;
+  signal: string;
+}
+
+export interface SlotDecision {
+  slotWorthiness: number;
+  verdict: SlotDecisionVerdict;
+  urgency: UrgencyLevel;
+  competition: CompetitionData;
+  reasoning: string;
+  seasonalNote: string | null;
+}

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
-import type { PODReport, BatchDesignResult } from '@/types/pod';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import type { PODReport, BatchDesignResult, SlotDecision } from '@/types/pod';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -347,14 +347,111 @@ function VoicePanel({ agents }: { agents: PODReport['agents'] }) {
   );
 }
 
+// ─── Slot Decision Panel ───────────────────────────────────────────────────────
+
+function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDecision | null; slotLoading: boolean }) {
+  if (slotLoading) {
+    return (
+      <div className="border border-stone-700 bg-stone-900/30 p-4 text-center">
+        <div className="text-xs font-mono text-stone-500 tracking-wider mb-2">SLOT DECISION</div>
+        <div className="flex items-center justify-center gap-2">
+          <div className="w-3 h-3 border border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+          <span className="text-stone-500 text-xs font-mono animate-pulse">Checking market conditions…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!slotDecision) return null;
+
+  const { slotWorthiness, verdict, urgency, competition, reasoning, seasonalNote } = slotDecision;
+
+  const worthColor = slotWorthiness >= 70 ? 'text-green-400' : slotWorthiness >= 50 ? 'text-yellow-400' : 'text-red-400';
+
+  const verdictCfg: Record<string, { label: string; cls: string }> = {
+    GO:   { label: '✓ USE THIS SLOT',  cls: 'bg-green-900/30 text-green-400 border-green-400/30' },
+    HOLD: { label: '⏸ HOLD THE SLOT',  cls: 'bg-yellow-900/30 text-yellow-400 border-yellow-400/30' },
+    SKIP: { label: '✗ SAVE THE SLOT',  cls: 'bg-red-900/30 text-red-400 border-red-400/30' }
+  };
+
+  const urgencyCfg: Record<string, { label: string; cls: string }> = {
+    UPLOAD_TODAY:      { label: '↑ UPLOAD TODAY',       cls: 'text-green-400' },
+    UPLOAD_THIS_WEEK:  { label: '→ UPLOAD THIS WEEK',   cls: 'text-blue-400' },
+    WAIT_FOR_SEASON:   { label: '↷ WAIT FOR SEASON',    cls: 'text-amber-400' },
+    SKIP:              { label: '✗ SKIP',                cls: 'text-red-400' }
+  };
+
+  const levelCfg: Record<string, { label: string; cls: string }> = {
+    BLUE_OCEAN:  { label: 'BLUE OCEAN',  cls: 'text-green-400 border-green-900/40 bg-green-900/10' },
+    MODERATE:    { label: 'MODERATE',    cls: 'text-blue-400 border-blue-900/40 bg-blue-900/10' },
+    SATURATED:   { label: 'SATURATED',   cls: 'text-yellow-400 border-yellow-900/40 bg-yellow-900/10' },
+    OVERCROWDED: { label: 'OVERCROWDED', cls: 'text-red-400 border-red-900/40 bg-red-900/10' },
+    UNKNOWN:     { label: 'UNKNOWN',     cls: 'text-stone-400 border-stone-700 bg-stone-900/10' }
+  };
+
+  const vc = verdictCfg[verdict] ?? verdictCfg.SKIP;
+  const uc = urgencyCfg[urgency] ?? urgencyCfg.SKIP;
+  const lc = levelCfg[competition.level] ?? levelCfg.UNKNOWN;
+
+  return (
+    <div className="border border-stone-700 bg-stone-900/30 p-4 space-y-4">
+      <div className="text-xs font-mono text-stone-500 tracking-wider">SLOT DECISION</div>
+
+      {/* Worthiness + verdict */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-xs font-mono text-stone-600 mb-1">SLOT WORTHINESS</div>
+          <div className={`text-5xl font-light ${worthColor}`}>{slotWorthiness}</div>
+          <div className="text-stone-600 text-xs">/ 100</div>
+        </div>
+        <div className="text-right space-y-2">
+          <span className={`text-sm font-mono tracking-wider px-3 py-1 border inline-block ${vc.cls}`}>
+            {vc.label}
+          </span>
+          <div className={`text-xs font-mono tracking-wider ${uc.cls}`}>{uc.label}</div>
+        </div>
+      </div>
+
+      {/* Competition block */}
+      <div className={`p-3 border ${lc.cls}`}>
+        <div className="flex items-center justify-between mb-1">
+          <span className={`text-xs font-mono font-bold tracking-wider ${lc.cls.split(' ')[0]}`}>{lc.label}</span>
+          <span className="text-xs font-mono text-stone-500">~{competition.estimatedListings} listings</span>
+        </div>
+        <div className="text-xs text-stone-500 font-mono mb-1 truncate">"{competition.searchTerm}"</div>
+        <div className="text-xs text-stone-400 leading-relaxed">{competition.signal}</div>
+      </div>
+
+      {/* Reasoning */}
+      {reasoning && (
+        <p className="text-stone-300 text-xs leading-relaxed">{reasoning}</p>
+      )}
+
+      {/* Seasonal note */}
+      {seasonalNote && (
+        <div className="border border-amber-400/30 bg-amber-900/10 px-3 py-2">
+          <div className="text-xs font-mono text-amber-400/60 mb-1 tracking-wider">SEASONAL OPPORTUNITY</div>
+          <p className="text-amber-300 text-xs">{seasonalNote}</p>
+        </div>
+      )}
+
+      {/* Formula footnote */}
+      <div className="text-xs text-stone-700 font-mono text-right">
+        Slot Worthiness = (CRS × 0.6) + (Market Score × 0.4)
+      </div>
+    </div>
+  );
+}
+
 // ─── Single result ─────────────────────────────────────────────────────────────
 
-function SingleReport({ result }: { result: SingleResult }) {
+function SingleReport({ result, slotDecision, slotLoading }: { result: SingleResult; slotDecision: SlotDecision | null; slotLoading: boolean }) {
   const { report, filename } = result;
   return (
     <div className="space-y-6">
       <div className="text-stone-500 text-sm font-mono text-center">{filename}</div>
       <CRSDisplay report={report} />
+      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} />
       <ShirtColorPanel agents={report.agents} />
       <NarrativeSection report={report} />
       <CommercialIntelPanel agents={report.agents} />
@@ -529,7 +626,29 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [slotDecision, setSlotDecision] = useState<SlotDecision | null>(null);
+  const [slotLoading, setSlotLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Fetch slot decision automatically after single-design analysis
+  useEffect(() => {
+    if (!result || result.mode !== 'single') return;
+    setSlotLoading(true);
+    fetch('/api/slot-decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        crs: result.report.crs,
+        nicheAgentOutput: result.report.agents.niche,
+        cloudVisionLabels: result.report.cloudVision?.labels ?? [],
+        filename: result.filename
+      })
+    })
+      .then(r => r.json())
+      .then(data => setSlotDecision(data as SlotDecision))
+      .catch(err => console.warn('Slot decision failed:', err))
+      .finally(() => setSlotLoading(false));
+  }, [result]);
 
   const PLATFORM_LABELS: Record<string, string> = {
     merch: 'Merch by Amazon',
@@ -568,6 +687,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSlotDecision(null);
     const fileArray = Array.from(files);
     setLoadingMsg(
       fileArray.length === 1
@@ -681,7 +801,7 @@ export default function Home() {
         {result && !loading && (
           <div className="border-t border-stone-800 pt-8">
             {result.mode === 'single' ? (
-              <SingleReport result={result} />
+              <SingleReport result={result} slotDecision={slotDecision} slotLoading={slotLoading} />
             ) : (
               <BatchReport result={result} />
             )}
