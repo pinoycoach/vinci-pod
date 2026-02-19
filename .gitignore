@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# POD Vinci — test designs (binary files, not for version control)
+/test-designs/
