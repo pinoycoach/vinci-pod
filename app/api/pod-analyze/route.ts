@@ -3,7 +3,7 @@ import { analyzePODDesign } from '@/services/podEngine';
 import type { BatchDesignResult } from '@/types/pod';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60; // Hobby: 60s max. Single ~33s. Upgrade to Pro → set 300 for large batches.
+export const maxDuration = 300; // Vercel Pro — supports large batches (20 designs ~130s)
 
 export async function POST(req: NextRequest) {
   try {
