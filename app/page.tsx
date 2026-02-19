@@ -538,15 +538,29 @@ export default function Home() {
     teepublic: 'Teepublic'
   };
 
-  const toBase64 = (file: File): Promise<string> =>
+  // Resize + compress to JPEG before sending — keeps base64 well under Vercel's 4.5MB body limit.
+  // Max 1500px on longest side, white background (handles PNG transparency), JPEG 92%.
+  const prepareImage = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        resolve(dataUrl.split(',')[1]);
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const MAX = 1500;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]);
       };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+      img.src = url;
     });
 
   const analyze = useCallback(async (files: FileList | null) => {
@@ -562,7 +576,7 @@ export default function Home() {
     );
     try {
       const images = await Promise.all(
-        fileArray.map(async f => ({ filename: f.name, base64: await toBase64(f) }))
+        fileArray.map(async f => ({ filename: f.name, base64: await prepareImage(f) }))
       );
       const res = await fetch('/api/pod-analyze', {
         method: 'POST',
@@ -570,8 +584,11 @@ export default function Home() {
         body: JSON.stringify({ images, platform })
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error ?? `HTTP ${res.status}`);
+        // Guard against non-JSON error responses (e.g. Vercel 413 plain text)
+        const text = await res.text();
+        let msg = `HTTP ${res.status}`;
+        try { msg = (JSON.parse(text) as { error?: string }).error ?? msg; } catch { msg = text.slice(0, 120) || msg; }
+        throw new Error(msg);
       }
       setResult(await res.json() as AnalysisResult);
     } catch (e) {
