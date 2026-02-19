@@ -24,6 +24,7 @@ async function runAgent(prompt: string, imageBase64: string, mimeType: string = 
   const ai = getAI();
   const result = await ai.models.generateContent({
     model: MODEL_ID,
+    config: { temperature: 0 }, // Deterministic scoring — same design always returns the same CRS
     contents: [
       {
         parts: [
@@ -126,6 +127,7 @@ Return ONLY valid JSON with no markdown fences:
 
   const result = await ai.models.generateContent({
     model: MODEL_ID,
+    config: { temperature: 0.7 }, // Narrative stays expressive — not locked to temperature 0
     contents: [
       {
         parts: [
