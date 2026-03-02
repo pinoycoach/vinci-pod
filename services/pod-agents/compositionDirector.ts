@@ -13,7 +13,7 @@ Analyze this product design through Da Vinci's compositional framework:
 
 3. VISUAL FLOW: Does the eye travel through the design naturally? Da Vinci ensured the viewer's gaze moved intentionally through his compositions.
 
-4. THUMBNAIL INTEGRITY: At 200x200 pixels (standard Amazon search result size), does this design still communicate its core message? Or does it become illegible noise?
+4. THUMBNAIL INTEGRITY: At 160×160 pixels (Amazon app mobile — where 70%+ of purchases happen), does this design still communicate its core message? Or does it become illegible noise?
 
 5. NEGATIVE SPACE: Da Vinci understood that what is NOT there defines what IS there. Does this design use negative space as a compositional tool, or is it cluttered?
 

@@ -14,10 +14,12 @@ export async function analyzeDesignWithCloudVision(base64Image: string): Promise
     requests: [{
       image: { content: base64Image },
       features: [
-        { type: 'LABEL_DETECTION', maxResults: 15 },
+        { type: 'LABEL_DETECTION', maxResults: 20 },      // expanded from 15
         { type: 'IMAGE_PROPERTIES' },
         { type: 'OBJECT_LOCALIZATION', maxResults: 10 },
-        { type: 'SAFE_SEARCH_DETECTION' }
+        { type: 'SAFE_SEARCH_DETECTION' },
+        { type: 'TEXT_DETECTION' },                        // exact OCR string
+        { type: 'CROP_HINTS', maxResults: 3 }              // thumbnail survival
       ]
     }]
   };
@@ -82,6 +84,17 @@ export async function analyzeDesignWithCloudVision(base64Image: string): Promise
     boundingPoly: o.boundingPoly
   }));
 
+  // OCR text — TEXT_DETECTION: first textAnnotation is the full merged text block
+  const textAnnotations = result.textAnnotations ?? [];
+  const ocrText = (textAnnotations[0]?.description ?? '').trim();
+
+  // Crop hints — thumbnail survival data
+  const cropHintsRaw = result.cropHintsAnnotation?.cropHints ?? [];
+  const cropHints = cropHintsRaw.map((h: { confidence?: number; importanceFraction?: number }) => ({
+    confidence: Math.round((h.confidence ?? 0) * 100) / 100,
+    importanceFraction: Math.round((h.importanceFraction ?? 0) * 100) / 100
+  }));
+
   return {
     labels,
     dominantColors,
@@ -95,16 +108,81 @@ export async function analyzeDesignWithCloudVision(base64Image: string): Promise
       dominantHex,
       colorMood,
       colorCount: dominantColors.length
-    }
+    },
+    ocrText,
+    cropHints
   };
 }
 
-// Format Cloud Vision data as agent context string
+// ─── Style Classifier ─────────────────────────────────────────────────────────
+// Computed from Cloud Vision data — no extra API cost
+
+export type DesignStyle =
+  | 'MINIMALIST'
+  | 'VINTAGE_RETRO'
+  | 'CHARACTER_DRIVEN'
+  | 'TYPOGRAPHIC'
+  | 'MAXIMALIST'
+  | 'PATTERN'
+  | 'UNKNOWN';
+
+export function classifyDesignStyle(cv: CloudVisionData): {
+  style: DesignStyle;
+  confidence: number;
+  styleNote: string;
+} {
+  const labelNames = cv.labels.map(l => l.description.toLowerCase());
+  const colorCount = cv.dominantColors.length;
+  const topColorFraction = cv.dominantColors[0]?.pixelFraction ?? 0;
+  const topColor = cv.dominantColors[0]?.color;
+
+  // Explicit label match first
+  if (labelNames.includes('minimalism') || labelNames.includes('minimalist'))
+    return { style: 'MINIMALIST', confidence: 85, styleNote: 'Cloud Vision detected minimalist aesthetic' };
+
+  // Vintage via warm amber/sepia palette
+  if (topColor) {
+    const rc = topColor.red ?? 0, gc = topColor.green ?? 0, bc = topColor.blue ?? 0;
+    if (rc > 150 && gc > 100 && bc < 80 && rc > gc && gc > bc)
+      return { style: 'VINTAGE_RETRO', confidence: 70, styleNote: 'Warm amber/sepia palette — vintage signal' };
+  }
+
+  // Typographic: text is hero, minimal objects
+  if ((labelNames.includes('typography') || labelNames.includes('font')) && cv.objects.length < 3)
+    return { style: 'TYPOGRAPHIC', confidence: 75, styleNote: 'Text-dominant design, minimal objects' };
+
+  // Character/illustration
+  if (labelNames.some(l => ['illustration', 'clip art', 'cartoon', 'drawing', 'animal'].includes(l)))
+    return { style: 'CHARACTER_DRIVEN', confidence: 80, styleNote: 'Character or illustration detected' };
+
+  // Pattern
+  if (labelNames.includes('pattern'))
+    return { style: 'PATTERN', confidence: 75, styleNote: 'Repeating pattern detected' };
+
+  // Maximalist: many objects OR many colors
+  if (cv.objects.length > 6 || colorCount > 4)
+    return { style: 'MAXIMALIST', confidence: 60, styleNote: 'Complex multi-element design' };
+
+  // Implied minimalism from limited palette
+  if (colorCount <= 2 || topColorFraction > 60)
+    return { style: 'MINIMALIST', confidence: 55, styleNote: 'Limited palette implies minimalist' };
+
+  return { style: 'UNKNOWN', confidence: 30, styleNote: 'Style undetermined' };
+}
+
+// ─── Agent Context Formatter ──────────────────────────────────────────────────
+
 export function formatVisionContextForAgents(cv: CloudVisionData): string {
   const topLabels = cv.labels.slice(0, 8).map(l => `${l.description} (${l.score}%)`).join(', ');
   const topColors = cv.dominantColors.slice(0, 3).map(c =>
     `${c.pixelFraction}% coverage`
   ).join(', ');
+
+  const styleResult = classifyDesignStyle(cv);
+
+  const cropSurvival = cv.cropHints[0]
+    ? `${Math.round(cv.cropHints[0].importanceFraction * 100)}% of visual content survives thumbnail crop`
+    : 'not available';
 
   return `
 CLOUD VISION COMPUTED DATA (mathematical, not interpreted):
@@ -114,5 +192,8 @@ CLOUD VISION COMPUTED DATA (mathematical, not interpreted):
 - Color coverage: ${topColors}
 - Main objects detected: ${cv.objects.slice(0, 5).map(o => o.name + ' (' + o.score + '%)').join(', ') || 'none'}
 - Safe Search: Adult=${cv.safeSearch.adult}, Violence=${cv.safeSearch.violence}, Racy=${cv.safeSearch.racy}
+- OCR extracted text (exact): "${cv.ocrText || 'none detected'}"
+- Thumbnail crop survival: ${cropSurvival}
+- Design style: ${styleResult.style} (confidence: ${styleResult.confidence}%) — ${styleResult.styleNote}
   `.trim();
 }

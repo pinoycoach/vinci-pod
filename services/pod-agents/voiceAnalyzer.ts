@@ -47,22 +47,44 @@ ADJUSTMENT FACTORS:
 - Word count 1-3: +10 (thumbnail survives)
 - Word count 4-6: ±0 (borderline thumbnail)
 - Word count 7+: -15 (thumbnail death sentence)
-- Text at thumbnail size (legible at 200x200px): +5
+- Text at thumbnail size (legible at 160×160px): +5
 - All-caps or bold: +5 (command presence)
 - Rhymes or rhythm: +5 (memorability)
 
-Extract the EXACT TEXT visible in the design. If no text is visible, classify as NO_TEXT.
+CULTURAL BAGGAGE CHECK — required for every alternativeVoice suggestion:
+Before suggesting any alternative text, verify it does NOT match:
+- A famous song title (any genre, any era) — e.g. "Lean On Me", "Born To Run", "Don't Stop Believin'"
+- A movie or TV show title or quote with strong cultural recognition
+- A brand slogan (Nike, Apple, Harley-Davidson, McDonald's, etc.)
+- A political slogan or partisan phrase
+- A religious scripture verse quoted exactly
+
+If your alternativeVoice suggestion matches any of the above:
+  set culturalBaggageRisk: true
+  set culturalBaggageNote to explain the specific conflict (e.g. "Bill Withers 1972 song — strong cultural association collapses niche clarity for buyers who don't connect it to the design subject")
+
+If it does not match any of the above:
+  set culturalBaggageRisk: false
+  set culturalBaggageNote: null
+
+TEXT EXTRACTION — ground truth priority:
+If "OCR extracted text (exact)" is provided in the data above and is not "none detected",
+use that string VERBATIM as your extractedText — do not paraphrase or rewrite it.
+If OCR text shows "none detected", classify as NO_TEXT.
+The OCR string is ground truth — Gemini visual inference of text is not needed when OCR is available.
 
 Return ONLY valid JSON with no markdown fences:
 {
   "voiceScore": 0-100,
   "voiceType": "PARASOCIAL_COMMAND" or "PARASOCIAL_STATEMENT" or "IRONIC_TITLE" or "IDENTITY_CLAIM" or "DECLARATIVE_STATEMENT" or "OBSERVER_DESCRIPTION" or "NO_TEXT",
-  "extractedText": "exact text from design, or null if no text",
+  "extractedText": "copy the OCR confirmed text verbatim, or null if no text detected",
   "wordCount": number or 0 if no text,
   "emotionalDirectness": 0-100,
   "thumbnailTextSurvival": "INTACT" or "PARTIAL" or "LOST" or "NO_TEXT",
   "conversionStrength": "STRONG" or "MODERATE" or "WEAK" or "NO_TEXT",
   "buyerPsychology": "string — why this text (or lack of text) triggers or fails to trigger purchase",
-  "alternativeVoice": "string — a rewrite suggestion to elevate to the next voice type, or 'Text is optimized' if PARASOCIAL_COMMAND"
+  "alternativeVoice": "string — a rewrite suggestion to elevate to the next voice type, or 'Text is optimized' if PARASOCIAL_COMMAND",
+  "culturalBaggageRisk": true or false,
+  "culturalBaggageNote": "explanation if true, or null"
 }
 `;

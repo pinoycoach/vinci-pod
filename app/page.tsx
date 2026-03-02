@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { PODReport, BatchDesignResult, SlotDecision } from '@/types/pod';
+import html2canvas from 'html2canvas';
+import type { PODReport, BatchDesignResult, SlotDecision, PathwayDetection, PurchasePathway, CloudVisionData } from '@/types/pod';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,44 @@ interface BatchResult {
 }
 
 type AnalysisResult = SingleResult | BatchResult;
+
+interface ShirtColorResult {
+  shirtColor: string;
+  thumbnailScore: number;
+  crsAdjustment: number;
+  adjustedCRS: number;
+  passes: boolean;
+  issue: string | null;
+  recommendation: string;
+  originalCRS: number;
+}
+
+// ─── Shirt color simulation helpers ──────────────────────────────────────────
+
+const SHIRT_HEX: Record<string, string> = {
+  'black':        '#1a1a1a',
+  'dark-heather': '#4a4a4a',
+  'navy':         '#1f2c56',
+  'white':        '#ffffff',
+  'natural':      '#f5f0e8'
+};
+
+const SHIRT_LABELS: Record<string, string> = {
+  'black':        'Black',
+  'dark-heather': 'Dark Heather',
+  'navy':         'Navy',
+  'white':        'White',
+  'natural':      'Natural'
+};
+
+function getColorsToTest(cv: CloudVisionData | null): string[] {
+  if (!cv || cv.dominantColors.length === 0) return ['black', 'dark-heather', 'white'];
+  const top = cv.dominantColors[0].color;
+  const brightness = ((top.red ?? 128) + (top.green ?? 128) + (top.blue ?? 128)) / 3;
+  if (brightness > 180) return ['black', 'dark-heather', 'navy'];   // light design — test dark shirts
+  if (brightness < 80)  return ['white', 'natural'];                 // dark design — test light shirts
+  return ['black', 'dark-heather', 'white'];                         // mid-tone — test both ends
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -53,6 +92,25 @@ function UploadBadge({ decision }: { decision: string }) {
   );
 }
 
+function PathwayBadge({ pathway }: { pathway: PathwayDetection | undefined }) {
+  if (!pathway) return null;
+  const cfg: Record<PurchasePathway, { label: string; cls: string }> = {
+    GIFT_IDENTITY:      { label: '🎁 GIFT / IDENTITY DESIGN',  cls: 'border-blue-400/30 text-blue-300 bg-blue-900/10' },
+    MEME_SELF_PURCHASE: { label: '😂 MEME / SELF-PURCHASE',    cls: 'border-yellow-400/30 text-yellow-300 bg-yellow-900/10' },
+    HYBRID:             { label: '◈ HYBRID — dual market',      cls: 'border-purple-400/30 text-purple-300 bg-purple-900/10' }
+  };
+  const { label, cls } = cfg[pathway.pathway];
+  return (
+    <div className={`border p-3 mb-4 ${cls}`}>
+      <div className="text-xs font-mono tracking-wider mb-0.5">{label}</div>
+      <div className="text-xs text-stone-500">{pathway.scoringNote}</div>
+      {pathway.signals.length > 0 && (
+        <div className="text-xs text-stone-600 mt-1">{pathway.signals.join(' · ')}</div>
+      )}
+    </div>
+  );
+}
+
 function CRSDisplay({ report }: { report: PODReport }) {
   const crsColor = report.crs >= 75 ? 'text-green-400' : report.crs >= 55 ? 'text-yellow-400' : 'text-red-400';
   return (
@@ -66,6 +124,73 @@ function CRSDisplay({ report }: { report: PODReport }) {
           BEST PLATFORM — <span className="text-amber-400/80">{report.bestPlatform.toUpperCase()}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function ShirtColorGate({ results, loading }: { results: ShirtColorResult[]; loading: boolean }) {
+  if (loading) return (
+    <div className="border border-stone-700 p-4 text-center">
+      <div className="flex items-center justify-center gap-2">
+        <div className="w-3 h-3 border border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+        <span className="text-stone-500 text-xs font-mono animate-pulse">Simulating shirt colors at 160×160px…</span>
+      </div>
+    </div>
+  );
+  if (results.length === 0) return null;
+
+  const allFail = results.every(r => !r.passes);
+  const firstFail = results.find(r => !r.passes);
+  const firstPass = results.find(r => r.passes);
+
+  return (
+    <div className="border border-stone-700 p-4 mt-4">
+      <div className="text-xs font-mono text-stone-500 tracking-wider mb-3">SHIRT COLOR GATE · 160×160px SIMULATION</div>
+      <div className="space-y-2">
+        {results.map(r => {
+          const scoreColor = r.thumbnailScore >= 80 ? 'text-green-400' : r.thumbnailScore >= 65 ? 'text-yellow-400' : 'text-red-400';
+          return (
+            <div
+              key={r.shirtColor}
+              className={`flex items-center justify-between p-3 border ${
+                r.passes ? 'border-green-900/40 bg-green-900/10' : 'border-red-900/40 bg-red-900/10'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-4 h-4 rounded-sm border border-stone-600 shrink-0"
+                  style={{ backgroundColor: SHIRT_HEX[r.shirtColor] ?? '#888' }}
+                />
+                <span className="text-sm text-stone-300 font-mono">{SHIRT_LABELS[r.shirtColor] ?? r.shirtColor}</span>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-mono">
+                <span className="text-stone-600">Thumb: <span className={scoreColor}>{r.thumbnailScore}</span></span>
+                {r.crsAdjustment !== 0 && (
+                  <span className="text-red-400">CRS {r.crsAdjustment}</span>
+                )}
+                <span className={r.passes ? 'text-green-400' : 'text-red-400'}>
+                  {r.passes ? '✓ PASSES' : '✗ FAILS'}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {allFail ? (
+        <div className="mt-3 text-xs text-red-400/70 font-mono border-l-2 border-red-900/40 pl-2">
+          ✗ All simulated colors fail — reconsider design contrast before uploading
+        </div>
+      ) : firstPass?.recommendation ? (
+        <div className="mt-3 text-xs text-amber-400/80 font-mono border-l-2 border-amber-900/40 pl-2">
+          → {firstPass.recommendation}
+        </div>
+      ) : null}
+      {firstFail?.issue && (
+        <div className="mt-2 text-xs text-stone-600 leading-relaxed">{firstFail.issue}</div>
+      )}
+      <div className="text-xs text-stone-700 font-mono text-right mt-2">
+        Simulated · not live marketplace data
+      </div>
     </div>
   );
 }
@@ -124,13 +249,13 @@ function PlatformGrid({ platforms, best }: { platforms: Record<string, unknown>;
 
 function AgentScoreGrid({ agents }: { agents: PODReport['agents'] }) {
   const rows = [
-    { label: 'Niche Clarity',  value: (agents.niche as Record<string, number>).nicheClarityScore,           color: 'bg-purple-500' },
-    { label: 'Thumbnail',      value: (agents.thumbnail as Record<string, number>).thumbnailScore,           color: 'bg-blue-500' },
-    { label: 'Voice',          value: (agents.voice as Record<string, number>).voiceScore,                   color: 'bg-teal-500' },
+    { label: 'Niche Clarity',  value: (agents.niche as Record<string, number>).nicheClarityScore,            color: 'bg-purple-500' },
+    { label: 'Thumbnail',      value: (agents.thumbnail as Record<string, number>).thumbnailScore,            color: 'bg-blue-500' },
+    { label: 'Voice',          value: (agents.voice as Record<string, number>).voiceScore,                    color: 'bg-teal-500' },
     { label: 'Composition',    value: (agents.composition as Record<string, number>).overallCompositionScore, color: 'bg-amber-500' },
-    { label: 'Commercial',     value: (agents.commercial as Record<string, number>).overallCommercialScore,  color: 'bg-green-500' },
-    { label: 'Contrast',       value: (agents.contrast as Record<string, number>).overallContrastScore,      color: 'bg-cyan-500' },
-    { label: 'Archetype Fit',  value: (agents.archetype as Record<string, number>).buyerAlignmentScore,      color: 'bg-rose-500' }
+    { label: 'Commercial',     value: (agents.commercial as Record<string, number>).overallCommercialScore,   color: 'bg-green-500' },
+    { label: 'Contrast',       value: (agents.contrast as Record<string, number>).overallContrastScore,       color: 'bg-cyan-500' },
+    { label: 'Archetype Fit',  value: (agents.archetype as Record<string, number>).buyerAlignmentScore,       color: 'bg-rose-500' }
   ];
   return (
     <div className="mt-6">
@@ -161,7 +286,7 @@ function ShirtColorPanel({ agents }: { agents: PODReport['agents'] }) {
 
   return (
     <div className="mt-4">
-      <div className="text-xs font-mono text-stone-500 tracking-wider mb-3">SHIRT COLORS — MERCH VARIANTS</div>
+      <div className="text-xs font-mono text-stone-500 tracking-wider mb-3">SHIRT COLORS — CONTRAST INFERENCE</div>
       <div className="grid grid-cols-2 gap-3">
         <div className={`p-3 border ${b.border}`}>
           <div className="text-xs font-mono text-stone-500 mb-2">DARK SHIRTS</div>
@@ -267,6 +392,8 @@ function VoicePanel({ agents }: { agents: PODReport['agents'] }) {
   const thumbnailTextSurvival = voice.thumbnailTextSurvival as string ?? 'NO_TEXT';
   const buyerPsychology = voice.buyerPsychology as string ?? '';
   const alternativeVoice = voice.alternativeVoice as string ?? '';
+  const culturalBaggageRisk = voice.culturalBaggageRisk as boolean | undefined;
+  const culturalBaggageNote = voice.culturalBaggageNote as string | null;
 
   const typeLabels: Record<string, string> = {
     PARASOCIAL_COMMAND:    'Parasocial Command',
@@ -335,19 +462,25 @@ function VoicePanel({ agents }: { agents: PODReport['agents'] }) {
         <p className="text-stone-500 text-xs leading-relaxed mb-2">{buyerPsychology}</p>
       )}
       {alternativeVoice && alternativeVoice !== 'Text is optimized' && (
-        <div className="border-l-2 border-amber-400/30 pl-3">
+        <div className="border-l-2 border-amber-400/30 pl-3 mb-2">
           <div className="text-xs font-mono text-amber-400/60 mb-1 tracking-wider">VOICE UPGRADE</div>
           <p className="text-stone-400 text-xs">{alternativeVoice}</p>
         </div>
       )}
       {alternativeVoice === 'Text is optimized' && (
-        <div className="text-xs font-mono text-green-400/60">✓ Text is optimized</div>
+        <div className="text-xs font-mono text-green-400/60 mb-2">✓ Text is optimized</div>
+      )}
+      {culturalBaggageRisk && culturalBaggageNote && (
+        <div className="border-l-2 border-red-400/30 pl-3 bg-red-900/10 py-2 pr-2">
+          <div className="text-xs font-mono text-red-400/70 mb-1 tracking-wider">⚠ CULTURAL BAGGAGE RISK</div>
+          <p className="text-red-300 text-xs leading-relaxed">{culturalBaggageNote}</p>
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Slot Decision Panel ───────────────────────────────────────────────────────
+// ─── Slot Decision Panel ──────────────────────────────────────────────────────
 
 function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDecision | null; slotLoading: boolean }) {
   if (slotLoading) {
@@ -365,7 +498,6 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
   if (!slotDecision) return null;
 
   const { slotWorthiness, verdict, urgency, competition, reasoning, seasonalNote } = slotDecision;
-
   const worthColor = slotWorthiness >= 70 ? 'text-green-400' : slotWorthiness >= 50 ? 'text-yellow-400' : 'text-red-400';
 
   const verdictCfg: Record<string, { label: string; cls: string }> = {
@@ -375,10 +507,10 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
   };
 
   const urgencyCfg: Record<string, { label: string; cls: string }> = {
-    UPLOAD_TODAY:      { label: '↑ UPLOAD TODAY',       cls: 'text-green-400' },
-    UPLOAD_THIS_WEEK:  { label: '→ UPLOAD THIS WEEK',   cls: 'text-blue-400' },
-    WAIT_FOR_SEASON:   { label: '↷ WAIT FOR SEASON',    cls: 'text-amber-400' },
-    SKIP:              { label: '✗ SKIP',                cls: 'text-red-400' }
+    UPLOAD_TODAY:     { label: '↑ UPLOAD TODAY',      cls: 'text-green-400' },
+    UPLOAD_THIS_WEEK: { label: '→ UPLOAD THIS WEEK',  cls: 'text-blue-400' },
+    WAIT_FOR_SEASON:  { label: '↷ WAIT FOR SEASON',   cls: 'text-amber-400' },
+    SKIP:             { label: '✗ SKIP',               cls: 'text-red-400' }
   };
 
   const levelCfg: Record<string, { label: string; cls: string }> = {
@@ -397,7 +529,6 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
     <div className="border border-stone-700 bg-stone-900/30 p-4 space-y-4">
       <div className="text-xs font-mono text-stone-500 tracking-wider">SLOT DECISION</div>
 
-      {/* Worthiness + verdict */}
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-xs font-mono text-stone-600 mb-1">SLOT WORTHINESS</div>
@@ -412,22 +543,17 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
         </div>
       </div>
 
-      {/* Competition block */}
       <div className={`p-3 border ${lc.cls}`}>
         <div className="flex items-center justify-between mb-1">
           <span className={`text-xs font-mono font-bold tracking-wider ${lc.cls.split(' ')[0]}`}>{lc.label}</span>
           <span className="text-xs font-mono text-stone-500">~{competition.estimatedListings} listings</span>
         </div>
-        <div className="text-xs text-stone-500 font-mono mb-1 truncate">"{competition.searchTerm}"</div>
+        <div className="text-xs text-stone-500 font-mono mb-1 truncate">&ldquo;{competition.searchTerm}&rdquo;</div>
         <div className="text-xs text-stone-400 leading-relaxed">{competition.signal}</div>
       </div>
 
-      {/* Reasoning */}
-      {reasoning && (
-        <p className="text-stone-300 text-xs leading-relaxed">{reasoning}</p>
-      )}
+      {reasoning && <p className="text-stone-300 text-xs leading-relaxed">{reasoning}</p>}
 
-      {/* Seasonal note */}
       {seasonalNote && (
         <div className="border border-amber-400/30 bg-amber-900/10 px-3 py-2">
           <div className="text-xs font-mono text-amber-400/60 mb-1 tracking-wider">SEASONAL OPPORTUNITY</div>
@@ -435,22 +561,37 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
         </div>
       )}
 
-      {/* Formula footnote */}
       <div className="text-xs text-stone-700 font-mono text-right">
-        Slot Worthiness = (CRS × 0.6) + (Market Score × 0.4)
+        Slot Worthiness = (CRS × 0.6) + (Market Score × 0.4) · Market estimate, not live data
       </div>
     </div>
   );
 }
 
-// ─── Single result ─────────────────────────────────────────────────────────────
+// ─── Single result ────────────────────────────────────────────────────────────
 
-function SingleReport({ result, slotDecision, slotLoading }: { result: SingleResult; slotDecision: SlotDecision | null; slotLoading: boolean }) {
+function SingleReport({
+  result,
+  slotDecision,
+  slotLoading,
+  shirtResults,
+  shirtLoading,
+  reportRef
+}: {
+  result: SingleResult;
+  slotDecision: SlotDecision | null;
+  slotLoading: boolean;
+  shirtResults: ShirtColorResult[];
+  shirtLoading: boolean;
+  reportRef: React.RefObject<HTMLDivElement | null>;
+}) {
   const { report, filename } = result;
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" ref={reportRef}>
       <div className="text-stone-500 text-sm font-mono text-center">{filename}</div>
+      <PathwayBadge pathway={report.pathway} />
       <CRSDisplay report={report} />
+      <ShirtColorGate results={shirtResults} loading={shirtLoading} />
       <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} />
       <ShirtColorPanel agents={report.agents} />
       <NarrativeSection report={report} />
@@ -469,15 +610,39 @@ function SingleReport({ result, slotDecision, slotLoading }: { result: SingleRes
             <div>Dominant color: <span className="font-mono text-amber-400">{report.cloudVision.imageProperties.dominantHex}</span></div>
             <div>Color mood: <span className="font-mono text-amber-400">{report.cloudVision.imageProperties.colorMood}</span></div>
             <div>Top labels: {report.cloudVision.labels.slice(0, 5).map(l => l.description).join(', ')}</div>
+            {report.cloudVision.ocrText && (
+              <div>OCR text: <span className="font-mono text-stone-300">&ldquo;{report.cloudVision.ocrText}&rdquo;</span></div>
+            )}
+            {report.cloudVision.cropHints[0] && (
+              <div>Crop survival: <span className="font-mono text-stone-300">{Math.round(report.cloudVision.cropHints[0].importanceFraction * 100)}%</span></div>
+            )}
           </div>
         </div>
       )}
-      <div className="text-xs text-stone-700 text-right font-mono">
-        Processed in {(report.processingTime / 1000).toFixed(1)}s
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-stone-700 font-mono">
+          Processed in {(report.processingTime / 1000).toFixed(1)}s
+        </div>
+        <button
+          onClick={() => {
+            if (!reportRef.current) return;
+            html2canvas(reportRef.current, { backgroundColor: '#0c0a09' }).then(canvas => {
+              const link = document.createElement('a');
+              link.download = `pod-vinci-${filename.replace(/\.[^.]+$/, '')}-${Date.now()}.png`;
+              link.href = canvas.toDataURL();
+              link.click();
+            });
+          }}
+          className="text-xs font-mono text-stone-600 hover:text-stone-400 border border-stone-800 hover:border-stone-600 px-3 py-1 transition-colors"
+        >
+          Export Report ↓
+        </button>
       </div>
     </div>
   );
 }
+
+// ─── Batch result ─────────────────────────────────────────────────────────────
 
 function BatchReport({ result }: { result: BatchResult }) {
   const { results, total, analyzed } = result;
@@ -491,9 +656,16 @@ function BatchReport({ result }: { result: BatchResult }) {
       return next;
     });
 
+  // Sort UPLOAD_NOW by slot worthiness (if available), then CRS
   const uploadNow = results
     .filter(r => r.report?.uploadDecision === 'UPLOAD_NOW')
-    .sort((a, b) => (b.report?.crs ?? 0) - (a.report?.crs ?? 0));
+    .sort((a, b) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const aW = (a.report as any)?.slotDecision?.slotWorthiness ?? a.report?.crs ?? 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bW = (b.report as any)?.slotDecision?.slotWorthiness ?? b.report?.crs ?? 0;
+      return bW - aW;
+    });
   const optimizeFirst = results
     .filter(r => r.report?.uploadDecision === 'OPTIMIZE_FIRST')
     .sort((a, b) => (b.report?.crs ?? 0) - (a.report?.crs ?? 0));
@@ -510,6 +682,22 @@ function BatchReport({ result }: { result: BatchResult }) {
     const isOpen = expanded.has(d.filename);
     const thumb = thumbScore(d);
     const niche = nicheScore(d);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const slotDecision = (d.report as any)?.slotDecision as SlotDecision | undefined;
+
+    const urgencyLabel: Record<string, string> = {
+      UPLOAD_TODAY:     '↑ TODAY',
+      UPLOAD_THIS_WEEK: '→ THIS WEEK',
+      WAIT_FOR_SEASON:  '↷ WAIT',
+      SKIP:             '✗ SKIP'
+    };
+    const urgencyColor: Record<string, string> = {
+      UPLOAD_TODAY:     'text-green-400',
+      UPLOAD_THIS_WEEK: 'text-blue-400',
+      WAIT_FOR_SEASON:  'text-amber-400',
+      SKIP:             'text-red-400'
+    };
+
     return (
       <div className="border border-stone-700 mb-2">
         <button
@@ -523,7 +711,7 @@ function BatchReport({ result }: { result: BatchResult }) {
                 <span className="text-stone-200 text-sm font-medium truncate max-w-xs">{d.filename}</span>
                 {d.report && <UploadBadge decision={d.report.uploadDecision} />}
               </div>
-              <div className="flex gap-4 mt-1.5 text-xs font-mono">
+              <div className="flex gap-4 mt-1.5 text-xs font-mono flex-wrap">
                 <span>
                   <span className="text-stone-600">Thumb </span>
                   <span className={thumb >= 70 ? 'text-green-400' : thumb >= 50 ? 'text-yellow-400' : 'text-red-400'}>{thumb}</span>
@@ -532,6 +720,19 @@ function BatchReport({ result }: { result: BatchResult }) {
                   <span className="text-stone-600">Niche </span>
                   <span className={niche >= 70 ? 'text-green-400' : niche >= 50 ? 'text-yellow-400' : 'text-red-400'}>{niche}</span>
                 </span>
+                {slotDecision && (
+                  <>
+                    <span>
+                      <span className="text-stone-600">Slot </span>
+                      <span className={slotDecision.slotWorthiness >= 70 ? 'text-green-400' : slotDecision.slotWorthiness >= 50 ? 'text-yellow-400' : 'text-red-400'}>
+                        {slotDecision.slotWorthiness}
+                      </span>
+                    </span>
+                    <span className={urgencyColor[slotDecision.urgency] ?? 'text-stone-500'}>
+                      {urgencyLabel[slotDecision.urgency] ?? slotDecision.urgency}
+                    </span>
+                  </>
+                )}
               </div>
               {d.report?.narrative?.executiveSummary && (
                 <div className="text-stone-500 text-xs mt-1 leading-relaxed line-clamp-2">
@@ -548,6 +749,18 @@ function BatchReport({ result }: { result: BatchResult }) {
         </button>
         {isOpen && d.report && (
           <div className="px-4 pb-4 border-t border-stone-800 pt-4 space-y-4">
+            {slotDecision && (
+              <div className="p-3 border border-stone-700 bg-stone-900/30 text-xs font-mono space-y-2">
+                <div className="text-stone-500 tracking-wider">SLOT DECISION</div>
+                <div className="flex gap-6 flex-wrap">
+                  <span><span className="text-stone-600">Worthiness </span><span className={slotDecision.slotWorthiness >= 70 ? 'text-green-400' : 'text-yellow-400'}>{slotDecision.slotWorthiness}</span></span>
+                  <span><span className="text-stone-600">Verdict </span><span className={slotDecision.verdict === 'GO' ? 'text-green-400' : slotDecision.verdict === 'HOLD' ? 'text-yellow-400' : 'text-red-400'}>{slotDecision.verdict}</span></span>
+                  <span className={urgencyColor[slotDecision.urgency] ?? 'text-stone-500'}>{urgencyLabel[slotDecision.urgency] ?? slotDecision.urgency}</span>
+                </div>
+                <div className="text-stone-400 leading-relaxed">{slotDecision.reasoning}</div>
+                <div className="text-stone-600">&ldquo;{slotDecision.competition.searchTerm}&rdquo; · {slotDecision.competition.level} · ~{slotDecision.competition.estimatedListings} listings</div>
+              </div>
+            )}
             <ShirtColorPanel agents={d.report.agents} />
             <CommercialIntelPanel agents={d.report.agents} />
             <VoicePanel agents={d.report.agents} />
@@ -583,7 +796,7 @@ function BatchReport({ result }: { result: BatchResult }) {
       {uploadNow.length > 0 && (
         <div>
           <div className="text-green-400 font-mono text-xs tracking-widest mb-3">
-            ✓ UPLOAD NOW <span className="text-stone-700 ml-2">— priority order</span>
+            ✓ UPLOAD NOW <span className="text-stone-700 ml-2">— ranked by slot worthiness</span>
           </div>
           {uploadNow.map((d, i) => <DesignRow key={d.filename} d={d} rank={i + 1} />)}
         </div>
@@ -628,7 +841,11 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [slotDecision, setSlotDecision] = useState<SlotDecision | null>(null);
   const [slotLoading, setSlotLoading] = useState(false);
+  const [shirtResults, setShirtResults] = useState<ShirtColorResult[]>([]);
+  const [shirtLoading, setShirtLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const lastBase64Ref = useRef<string>('');
+  const reportRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch slot decision automatically after single-design analysis
   useEffect(() => {
@@ -648,6 +865,45 @@ export default function Home() {
       .then(data => setSlotDecision(data as SlotDecision))
       .catch(err => console.warn('Slot decision failed:', err))
       .finally(() => setSlotLoading(false));
+  }, [result]);
+
+  // Run shirt color simulation after single-design analysis
+  useEffect(() => {
+    if (!result || result.mode !== 'single' || !lastBase64Ref.current) return;
+    const designBase64 = lastBase64Ref.current;
+    const cv = result.report.cloudVision;
+    const crs = result.report.crs;
+    const colors = getColorsToTest(cv);
+
+    setShirtLoading(true);
+    setShirtResults([]);
+
+    Promise.all(colors.map(async (color) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 160;
+      canvas.height = 160;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = SHIRT_HEX[color] ?? '#888888';
+      ctx.fillRect(0, 0, 160, 160);
+
+      const img = new Image();
+      img.src = `data:image/jpeg;base64,${designBase64}`;
+      await new Promise<void>(resolve => { img.onload = () => resolve(); });
+
+      const padding = 18;
+      ctx.drawImage(img, padding, padding, 160 - padding * 2, 160 - padding * 2);
+      const compositedBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+      const res = await fetch('/api/shirt-color-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ compositedImage: compositedBase64, shirtColor: color, originalCRS: crs })
+      });
+      return res.json() as Promise<ShirtColorResult>;
+    }))
+      .then(r => setShirtResults(r))
+      .catch(err => console.warn('Shirt color simulation failed:', err))
+      .finally(() => setShirtLoading(false));
   }, [result]);
 
   const PLATFORM_LABELS: Record<string, string> = {
@@ -688,6 +944,8 @@ export default function Home() {
     setError(null);
     setResult(null);
     setSlotDecision(null);
+    setShirtResults([]);
+    lastBase64Ref.current = '';
     const fileArray = Array.from(files);
     setLoadingMsg(
       fileArray.length === 1
@@ -698,13 +956,16 @@ export default function Home() {
       const images = await Promise.all(
         fileArray.map(async f => ({ filename: f.name, base64: await prepareImage(f) }))
       );
+      // Store base64 for shirt color simulation (single design only)
+      if (images.length === 1) {
+        lastBase64Ref.current = images[0].base64;
+      }
       const res = await fetch('/api/pod-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ images, platform })
       });
       if (!res.ok) {
-        // Guard against non-JSON error responses (e.g. Vercel 413 plain text)
         const text = await res.text();
         let msg = `HTTP ${res.status}`;
         try { msg = (JSON.parse(text) as { error?: string }).error ?? msg; } catch { msg = text.slice(0, 120) || msg; }
@@ -731,8 +992,8 @@ export default function Home() {
           <p className="text-stone-500 text-xs font-mono mt-0.5">Commercial Resonance Analyzer · Da Vinci Engine</p>
         </div>
         <div className="text-stone-600 text-xs font-mono text-right">
-          <div>v1.0</div>
-          <div>~$0.11 / design</div>
+          <div>v1.1</div>
+          <div>~$0.17 / design</div>
         </div>
       </div>
 
@@ -801,7 +1062,14 @@ export default function Home() {
         {result && !loading && (
           <div className="border-t border-stone-800 pt-8">
             {result.mode === 'single' ? (
-              <SingleReport result={result} slotDecision={slotDecision} slotLoading={slotLoading} />
+              <SingleReport
+                result={result}
+                slotDecision={slotDecision}
+                slotLoading={slotLoading}
+                shirtResults={shirtResults}
+                shirtLoading={shirtLoading}
+                reportRef={reportRef}
+              />
             ) : (
               <BatchReport result={result} />
             )}

@@ -26,6 +26,11 @@ export interface CloudVisionData {
     colorMood: string;
     colorCount: number;
   };
+  ocrText: string;          // exact text extracted by Cloud Vision OCR — empty string if none
+  cropHints: Array<{
+    confidence: number;
+    importanceFraction: number;
+  }>;
 }
 
 export interface AgentScores {
@@ -39,10 +44,22 @@ export interface AgentScores {
   voice: number;
 }
 
+// Purchase pathway — determines which scoring rubric applies
+export type PurchasePathway = 'GIFT_IDENTITY' | 'MEME_SELF_PURCHASE' | 'HYBRID';
+
+export interface PathwayDetection {
+  pathway: PurchasePathway;
+  confidence: number;     // 0–100
+  signals: string[];      // what triggered this classification
+  scoringNote: string;    // which rubric applies
+}
+
 export interface PODReport {
   crs: number;                   // Commercial Resonance Score 0-100
   uploadDecision: UploadDecision;
   cloudVision: CloudVisionData | null;
+  pathway?: PathwayDetection;    // computed from Cloud Vision — undefined if CV unavailable
+  slotDecision?: SlotDecision;   // enriched in batch mode for UPLOAD_NOW results
   agents: {
     composition: Record<string, unknown>;
     contrast: Record<string, unknown>;

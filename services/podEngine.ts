@@ -8,7 +8,7 @@ import { POD_COMMERCIAL_STRATEGIST_PROMPT } from './pod-agents/commercialStrateg
 import { POD_ARCHETYPE_READER_PROMPT } from './pod-agents/archetypeReader';
 import { PLATFORM_AGENT_PROMPT } from './pod-agents/platformAgent';
 import { VOICE_ANALYZER_PROMPT } from './pod-agents/voiceAnalyzer';
-import type { PODReport, PODNarrative, UploadDecision, CloudVisionData } from '@/types/pod';
+import type { PODReport, PODNarrative, UploadDecision, CloudVisionData, PathwayDetection, PurchasePathway } from '@/types/pod';
 
 const MODEL_ID = 'gemini-2.5-flash';
 
@@ -46,19 +46,57 @@ async function runAgent(prompt: string, imageBase64: string, mimeType: string = 
   }
 }
 
-function computeCRS(scores: Record<string, number>): number {
-  // Weighted composite — thumbnail and niche clarity carry the most weight for POD
-  // voice at 0.10 funds proportionally reduced from composition, contrast, commercial, platform
-  const weights: Record<string, number> = {
+// ─── Platform-specific CRS weight profiles ────────────────────────────────────
+
+const CRS_WEIGHTS: Record<string, Record<string, number>> = {
+  merch: {
+    // Niche + Thumbnail dominant — keyword search + mobile thumbnail is the whole game
     composition: 0.13,
     contrast:    0.09,
-    niche:       0.23,   // #1 — niche clarity is the top predictor
-    thumbnail:   0.23,   // #1 — if it doesn't work at thumbnail, nothing else matters
+    niche:       0.23,
+    thumbnail:   0.23,
     commercial:  0.13,
     archetype:   0.05,
     platform:    0.04,
-    voice:       0.10    // parasocial voice type — does the text speak TO the buyer?
-  };
+    voice:       0.10
+  },
+  etsy: {
+    // Commercial + Archetype raised — Etsy buyers are gift/emotional, browse-based not search-exact
+    composition: 0.13,
+    contrast:    0.09,
+    niche:       0.15,
+    thumbnail:   0.18,
+    commercial:  0.18,
+    archetype:   0.13,
+    platform:    0.04,
+    voice:       0.10
+  },
+  redbubble: {
+    // Composition + Archetype raised — art buyers, discovery platform, larger thumbnails
+    composition: 0.18,
+    contrast:    0.10,
+    niche:       0.15,
+    thumbnail:   0.15,
+    commercial:  0.13,
+    archetype:   0.15,
+    platform:    0.06,
+    voice:       0.08
+  },
+  teepublic: {
+    // Slightly more archetype + voice — younger demographic, humour-forward
+    composition: 0.13,
+    contrast:    0.08,
+    niche:       0.21,
+    thumbnail:   0.22,
+    commercial:  0.13,
+    archetype:   0.08,
+    platform:    0.04,
+    voice:       0.11
+  }
+};
+
+function computeCRS(scores: Record<string, number>, platform: string = 'merch'): number {
+  const weights = CRS_WEIGHTS[platform] ?? CRS_WEIGHTS.merch;
 
   return Math.round(
     Object.entries(weights).reduce((total, [key, weight]) => {
@@ -72,6 +110,70 @@ function getUploadDecision(crs: number, thumbnailVerdict: string): UploadDecisio
   if (crs >= 75) return 'UPLOAD_NOW';
   if (crs >= 55) return 'OPTIMIZE_FIRST';
   return 'DO_NOT_UPLOAD';
+}
+
+// ─── Purchase Pathway Detection ───────────────────────────────────────────────
+// Computed from Cloud Vision data — determines which scoring rubric applies
+
+function detectPurchasePathway(cv: CloudVisionData, ocrText: string): PathwayDetection {
+  const signals: string[] = [];
+  let giftScore = 0;
+  let memeScore = 0;
+
+  const labelNames = cv.labels.map(l => l.description.toLowerCase());
+  const text = ocrText.toLowerCase();
+
+  // Gift/Identity signals
+  if (labelNames.some(l => ['dog', 'cat', 'animal', 'pet', 'bird'].includes(l))) {
+    giftScore += 30; signals.push('Animal subject detected');
+  }
+  if (cv.imageProperties.colorMood === 'warm') {
+    giftScore += 15; signals.push('Warm palette — gift purchase signal');
+  }
+  if (['mum', 'mom', 'dad', 'gift', 'breed'].some(w => text.includes(w))) {
+    giftScore += 25; signals.push('Identity/gift language in text');
+  }
+
+  // Meme/Self-purchase signals
+  const ironyWords = ['no.', 'nope', 'fine', 'whatever', 'okay', 'sure', 'trust', 'bruh', 'vibes', 'chaos', 'help', 'literally'];
+  if (ironyWords.some(w => text.includes(w))) {
+    memeScore += 30; signals.push('Ironic/humour text detected');
+  }
+  if (labelNames.some(l => ['meme', 'humor', 'satire', 'comedy'].includes(l))) {
+    memeScore += 35; signals.push('Meme/humour label from Cloud Vision');
+  }
+  if (cv.imageProperties.colorMood === 'high-contrast' && cv.objects.length < 2) {
+    memeScore += 15; signals.push('High-contrast minimal composition — scroll-stop design');
+  }
+
+  const total = giftScore + memeScore;
+  if (total === 0) return {
+    pathway: 'GIFT_IDENTITY' as PurchasePathway,
+    confidence: 50,
+    signals,
+    scoringNote: 'No strong signals — defaulting to gift/identity rubric'
+  };
+
+  const giftPct = Math.round((giftScore / total) * 100);
+
+  if (giftPct >= 65) return {
+    pathway: 'GIFT_IDENTITY' as PurchasePathway,
+    confidence: giftPct,
+    signals,
+    scoringNote: 'Score using: Trust, Warmth, Parasocial Bond, identity signal'
+  };
+  if (giftPct <= 35) return {
+    pathway: 'MEME_SELF_PURCHASE' as PurchasePathway,
+    confidence: 100 - giftPct,
+    signals,
+    scoringNote: 'Priority signals: Scroll-Stop AND Voice. Deploy if both 80+.'
+  };
+  return {
+    pathway: 'HYBRID' as PurchasePathway,
+    confidence: 50,
+    signals,
+    scoringNote: 'Dual-market design — consider dual ASIN strategy'
+  };
 }
 
 async function synthesizeNarrative(
@@ -172,6 +274,15 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     }
   }
 
+  // Purchase Pathway Detection — computed before agents, injected into visionContext
+  const pathway = cloudVisionData
+    ? detectPurchasePathway(cloudVisionData, cloudVisionData.ocrText ?? '')
+    : undefined;
+
+  if (pathway) {
+    visionContext += `\n- Purchase pathway: ${pathway.pathway} (confidence: ${pathway.confidence}%) — ${pathway.scoringNote}`;
+  }
+
   // Phase 1: Run all 8 agents in parallel
   const [
     compositionResult,
@@ -193,7 +304,7 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     runAgent(VOICE_ANALYZER_PROMPT(visionContext), imageBase64)
   ]);
 
-  // Phase 2: Compute Commercial Resonance Score
+  // Phase 2: Compute Commercial Resonance Score (platform-specific weights)
   const crs = computeCRS({
     composition: compositionResult.overallCompositionScore as number,
     contrast:    contrastResult.overallContrastScore as number,
@@ -203,7 +314,7 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     archetype:   archetypeResult.buyerAlignmentScore as number,
     platform:    (platformResult[platform] as { score: number } | undefined)?.score ?? 65,
     voice:       voiceResult.voiceScore as number
-  });
+  }, platform);
 
   // Phase 3: Synthesize narrative
   const narrative = await synthesizeNarrative(
@@ -216,6 +327,7 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     crs,
     uploadDecision: getUploadDecision(crs, thumbnailResult.thumbnailVerdict as string),
     cloudVision: cloudVisionData,
+    pathway,
     agents: {
       composition: compositionResult,
       contrast: contrastResult,

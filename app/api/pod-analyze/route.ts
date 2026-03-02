@@ -55,6 +55,37 @@ export async function POST(req: NextRequest) {
       .filter(r => r.report.uploadDecision !== 'DO_NOT_UPLOAD')
       .map(r => r.filename);
 
+    // Enrich UPLOAD_NOW results with slot decisions in parallel
+    // This gives each winner a Slot Worthiness score without manual re-runs
+    const uploadNowResults = validResults.filter(r => r.report.uploadDecision === 'UPLOAD_NOW');
+
+    if (uploadNowResults.length > 0) {
+      const baseUrl = req.nextUrl.origin;
+      const slotDecisions = await Promise.allSettled(
+        uploadNowResults.map(r =>
+          fetch(`${baseUrl}/api/slot-decision`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              crs: r.report.crs,
+              nicheAgentOutput: r.report.agents.niche,
+              cloudVisionLabels: r.report.cloudVision?.labels ?? [],
+              filename: r.filename
+            })
+          }).then(res => res.json())
+        )
+      );
+
+      // Merge slot decisions back into reports
+      uploadNowResults.forEach((r, i) => {
+        const settled = slotDecisions[i];
+        if (settled.status === 'fulfilled') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (r.report as any).slotDecision = settled.value;
+        }
+      });
+    }
+
     return NextResponse.json({
       mode: 'batch',
       total: images.length,
