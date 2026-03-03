@@ -33,17 +33,6 @@ export interface CloudVisionData {
   }>;
 }
 
-export interface AgentScores {
-  composition: number;
-  contrast: number;
-  niche: number;
-  thumbnail: number;
-  commercial: number;
-  archetype: number;
-  platform: number;
-  voice: number;
-}
-
 // Purchase pathway — determines which scoring rubric applies
 export type PurchasePathway = 'GIFT_IDENTITY' | 'MEME_SELF_PURCHASE' | 'HYBRID';
 
@@ -59,6 +48,7 @@ export interface PODReport {
   uploadDecision: UploadDecision;
   cloudVision: CloudVisionData | null;
   pathway?: PathwayDetection;    // computed from Cloud Vision — undefined if CV unavailable
+  memeRubricActive?: boolean;    // true when CRS was recalculated using meme weights
   slotDecision?: SlotDecision;   // enriched in batch mode for UPLOAD_NOW results
   agents: {
     composition: Record<string, unknown>;

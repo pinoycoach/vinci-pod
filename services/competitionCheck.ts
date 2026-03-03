@@ -54,10 +54,11 @@ export function competitionLevelToScore(level: CompetitionLevel): number {
  * Maps an estimated listing count string to a CompetitionLevel.
  */
 export function estimateCompetitionLevel(estimatedCount: string): CompetitionLevel {
+  // Order: most specific → least specific. Previous order let "500-2,000" hit MODERATE before SATURATED.
+  if (estimatedCount.includes('> 10,000') || estimatedCount.includes('>10'))  return 'OVERCROWDED';
+  if (estimatedCount.includes('2,000') || estimatedCount.includes('2000'))    return 'SATURATED';
   if (estimatedCount.includes('< 500') || estimatedCount.includes('<500'))    return 'BLUE_OCEAN';
   if (estimatedCount.includes('500'))                                          return 'MODERATE';
-  if (estimatedCount.includes('2,000') || estimatedCount.includes('2000'))    return 'SATURATED';
-  if (estimatedCount.includes('> 10,000') || estimatedCount.includes('>10'))  return 'OVERCROWDED';
   return 'UNKNOWN';
 }
 

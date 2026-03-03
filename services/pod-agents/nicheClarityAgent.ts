@@ -22,6 +22,7 @@ Return ONLY valid JSON with no markdown fences:
   "nicheClarityScore": 0-100,
   "nicheSpecificityLevel": "WEAK" or "MODERATE" or "STRONG" or "EXCEPTIONAL",
   "targetBuyer": "string — specific description of exact buyer",
+  "nicheKeywords": "string — 2–4 word primary Amazon search term a buyer would type to find this design (e.g. 'border collie agility', 'cat mom gift', 'funny nurse shirt')",
   "selfIdentificationSpeed": "INSTANT" or "3_SECONDS" or "REQUIRES_READING" or "UNCLEAR",
   "thumbnailNicheSignal": "STRONG" or "PARTIAL" or "LOST",
   "nicheRecommendation": "string — how to sharpen or maintain niche clarity"

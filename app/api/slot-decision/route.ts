@@ -7,6 +7,7 @@ import {
   competitionSignalLine
 } from '@/services/competitionCheck';
 import type { SlotDecision, SlotDecisionVerdict, UrgencyLevel, CompetitionLevel } from '@/types/pod';
+import { stripJsonFences } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30; // Two fast text-only Gemini calls, no images
@@ -15,10 +16,6 @@ const MODEL_ID = 'gemini-2.5-flash';
 
 function getAI() {
   return new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });
-}
-
-function stripJsonFences(text: string): string {
-  return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 }
 
 function computeSlotWorthiness(crs: number, competitionScore: number): number {
@@ -37,7 +34,7 @@ function getUrgency(verdict: SlotDecisionVerdict, level: CompetitionLevel, hasSe
   if (verdict === 'HOLD') return 'WAIT_FOR_SEASON';
   // verdict === GO
   if (level === 'BLUE_OCEAN') return 'UPLOAD_TODAY';
-  return hasSeasonalNote ? 'UPLOAD_THIS_WEEK' : 'UPLOAD_THIS_WEEK';
+  return hasSeasonalNote ? 'UPLOAD_TODAY' : 'UPLOAD_THIS_WEEK';
 }
 
 export async function POST(req: NextRequest) {

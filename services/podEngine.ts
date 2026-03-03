@@ -9,15 +9,12 @@ import { POD_ARCHETYPE_READER_PROMPT } from './pod-agents/archetypeReader';
 import { PLATFORM_AGENT_PROMPT } from './pod-agents/platformAgent';
 import { VOICE_ANALYZER_PROMPT } from './pod-agents/voiceAnalyzer';
 import type { PODReport, PODNarrative, UploadDecision, CloudVisionData, PathwayDetection, PurchasePathway } from '@/types/pod';
+import { stripJsonFences } from '@/lib/utils';
 
 const MODEL_ID = 'gemini-2.5-flash';
 
 function getAI() {
   return new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });
-}
-
-function stripJsonFences(text: string): string {
-  return text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
 async function runAgent(prompt: string, imageBase64: string, mimeType: string = 'image/jpeg'): Promise<Record<string, unknown>> {
@@ -100,6 +97,30 @@ function computeCRS(scores: Record<string, number>, platform: string = 'merch'):
 
   return Math.round(
     Object.entries(weights).reduce((total, [key, weight]) => {
+      return total + (scores[key] ?? 65) * weight;
+    }, 0)
+  );
+}
+
+// ─── Meme/Self-Purchase rubric ─────────────────────────────────────────────────
+// When Purchase Pathway = MEME_SELF_PURCHASE, standard gift/identity weights
+// tank CRS on designs where Voice + Commercial are the real conversion signals.
+// Voice is 10% in the standard merch rubric — here it's the #1 driver at 30%.
+
+const MEME_WEIGHTS: Record<string, number> = {
+  voice:       0.30,   // parasocial command is the convert trigger for meme designs
+  commercial:  0.25,   // scroll-stop / impulse purchase proxy
+  niche:       0.20,   // findability still matters
+  thumbnail:   0.15,   // less critical — meme buyers search by keyword, not browse
+  contrast:    0.10,   // readability at thumbnail size
+  composition: 0.00,   // not relevant for text-dominant meme designs
+  archetype:   0.00,   // already baked into voice classification
+  platform:    0.00    // handled separately via bestPlatform
+};
+
+function computeMemeCRS(scores: Record<string, number>): number {
+  return Math.round(
+    Object.entries(MEME_WEIGHTS).reduce((total, [key, weight]) => {
       return total + (scores[key] ?? 65) * weight;
     }, 0)
   );
@@ -304,8 +325,8 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     runAgent(VOICE_ANALYZER_PROMPT(visionContext), imageBase64)
   ]);
 
-  // Phase 2: Compute Commercial Resonance Score (platform-specific weights)
-  const crs = computeCRS({
+  // Phase 2: Compute Commercial Resonance Score
+  const agentScores = {
     composition: compositionResult.overallCompositionScore as number,
     contrast:    contrastResult.overallContrastScore as number,
     niche:       nicheResult.nicheClarityScore as number,
@@ -314,7 +335,14 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     archetype:   archetypeResult.buyerAlignmentScore as number,
     platform:    (platformResult[platform] as { score: number } | undefined)?.score ?? 65,
     voice:       voiceResult.voiceScore as number
-  }, platform);
+  };
+
+  // If pathway is MEME_SELF_PURCHASE, use meme weights — Voice + Commercial are the real signals.
+  // Standard gift/identity weights (Niche 23% + Thumbnail 23%) tank CRS on text-dominant designs.
+  const memeRubricActive = pathway?.pathway === 'MEME_SELF_PURCHASE';
+  const crs = memeRubricActive
+    ? computeMemeCRS(agentScores)
+    : computeCRS(agentScores, platform);
 
   // Phase 3: Synthesize narrative
   const narrative = await synthesizeNarrative(
@@ -328,6 +356,7 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     uploadDecision: getUploadDecision(crs, thumbnailResult.thumbnailVerdict as string),
     cloudVision: cloudVisionData,
     pathway,
+    memeRubricActive,
     agents: {
       composition: compositionResult,
       contrast: contrastResult,

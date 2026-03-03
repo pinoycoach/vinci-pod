@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import html2canvas from 'html2canvas';
+// html2canvas loaded dynamically on export click to reduce initial bundle (~200KB)
 import type { PODReport, BatchDesignResult, SlotDecision, PathwayDetection, PurchasePathway, CloudVisionData } from '@/types/pod';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -114,14 +114,24 @@ function PathwayBadge({ pathway }: { pathway: PathwayDetection | undefined }) {
 function CRSDisplay({ report }: { report: PODReport }) {
   const crsColor = report.crs >= 75 ? 'text-green-400' : report.crs >= 55 ? 'text-yellow-400' : 'text-red-400';
   return (
-    <div className="text-center py-8 border border-stone-700 bg-stone-900/50">
-      <div className="text-xs tracking-widest text-amber-400/60 mb-2 font-mono">COMMERCIAL RESONANCE SCORE</div>
-      <div className={`text-8xl font-light ${crsColor}`}>{report.crs}</div>
-      <div className="text-stone-500 text-sm mb-4">/ 100</div>
-      <UploadBadge decision={report.uploadDecision} />
-      {report.bestPlatform && (
-        <div className="mt-3 text-xs text-stone-500 font-mono tracking-wider">
-          BEST PLATFORM — <span className="text-amber-400/80">{report.bestPlatform.toUpperCase()}</span>
+    <div>
+      <div className="text-center py-8 border border-stone-700 bg-stone-900/50">
+        <div className="text-xs tracking-widest text-amber-400/60 mb-2 font-mono">COMMERCIAL RESONANCE SCORE</div>
+        <div className={`text-8xl font-light ${crsColor}`}>{report.crs}</div>
+        <div className="text-stone-500 text-sm mb-4">/ 100</div>
+        <UploadBadge decision={report.uploadDecision} />
+        {report.bestPlatform && (
+          <div className="mt-3 text-xs text-stone-500 font-mono tracking-wider">
+            BEST PLATFORM — <span className="text-amber-400/80">{report.bestPlatform.toUpperCase()}</span>
+          </div>
+        )}
+      </div>
+      {report.memeRubricActive && (
+        <div className="border border-yellow-400/20 bg-yellow-400/5 p-3 mt-2 text-xs font-mono space-y-1">
+          <div className="text-yellow-400/80 tracking-wider">⚡ MEME RUBRIC ACTIVE</div>
+          <div className="text-stone-400">Scored on: Voice 30% · Scroll-Stop 25% · Niche 20% · Thumbnail 15% · Contrast 10%</div>
+          <div className="text-stone-500">Standard gift/identity rubric does not apply to this design type.</div>
+          <div className="text-yellow-400/60">Deploy if Voice 80+ AND Slot Worthiness 75+.</div>
         </div>
       )}
     </div>
@@ -624,14 +634,14 @@ function SingleReport({
           Processed in {(report.processingTime / 1000).toFixed(1)}s
         </div>
         <button
-          onClick={() => {
+          onClick={async () => {
             if (!reportRef.current) return;
-            html2canvas(reportRef.current, { backgroundColor: '#0c0a09' }).then(canvas => {
-              const link = document.createElement('a');
-              link.download = `pod-vinci-${filename.replace(/\.[^.]+$/, '')}-${Date.now()}.png`;
-              link.href = canvas.toDataURL();
-              link.click();
-            });
+            const html2canvas = (await import('html2canvas')).default;
+            const canvas = await html2canvas(reportRef.current, { backgroundColor: '#0c0a09' });
+            const link = document.createElement('a');
+            link.download = `pod-vinci-${filename.replace(/\.[^.]+$/, '')}-${Date.now()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
           }}
           className="text-xs font-mono text-stone-600 hover:text-stone-400 border border-stone-800 hover:border-stone-600 px-3 py-1 transition-colors"
         >
@@ -670,6 +680,7 @@ function BatchReport({ result }: { result: BatchResult }) {
     .filter(r => r.report?.uploadDecision === 'OPTIMIZE_FIRST')
     .sort((a, b) => (b.report?.crs ?? 0) - (a.report?.crs ?? 0));
   const doNotUpload = results.filter(r => r.report?.uploadDecision === 'DO_NOT_UPLOAD');
+  const errored = results.filter(r => !r.report && r.error);
 
   const thumbScore = (r: BatchDesignResult) =>
     (r.report?.agents.thumbnail as Record<string, number> | undefined)?.thumbnailScore ?? 0;
@@ -790,6 +801,7 @@ function BatchReport({ result }: { result: BatchResult }) {
         {uploadNow.length > 0 && <span className="text-green-400">✓ {uploadNow.length} UPLOAD NOW</span>}
         {optimizeFirst.length > 0 && <span className="text-yellow-400">⚠ {optimizeFirst.length} OPTIMIZE FIRST</span>}
         {doNotUpload.length > 0 && <span className="text-red-400/60">✗ {doNotUpload.length} DO NOT UPLOAD</span>}
+        {errored.length > 0 && <span className="text-red-400/40">⚠ {errored.length} FAILED</span>}
       </div>
 
       {/* UPLOAD NOW */}
@@ -823,7 +835,20 @@ function BatchReport({ result }: { result: BatchResult }) {
         </div>
       )}
 
-      {uploadNow.length === 0 && optimizeFirst.length === 0 && (
+      {/* FAILED — errored designs that didn't produce a report */}
+      {errored.length > 0 && (
+        <div>
+          <div className="text-red-400/50 font-mono text-xs tracking-widest mb-3">⚠ FAILED ({errored.length})</div>
+          {errored.map((d) => (
+            <div key={d.filename} className="border border-red-900/30 bg-red-900/10 p-3 mb-2 flex items-center justify-between">
+              <span className="text-stone-400 font-mono text-sm truncate max-w-xs">{d.filename}</span>
+              <span className="text-red-400/70 text-xs font-mono">{d.error}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {uploadNow.length === 0 && optimizeFirst.length === 0 && errored.length === 0 && (
         <div className="text-stone-500 text-sm text-center py-6">No designs cleared the upload threshold.</div>
       )}
     </div>
@@ -850,6 +875,7 @@ export default function Home() {
   // Fetch slot decision automatically after single-design analysis
   useEffect(() => {
     if (!result || result.mode !== 'single') return;
+    let stale = false;
     setSlotLoading(true);
     fetch('/api/slot-decision', {
       method: 'POST',
@@ -861,15 +887,24 @@ export default function Home() {
         filename: result.filename
       })
     })
-      .then(r => r.json())
-      .then(data => setSlotDecision(data as SlotDecision))
+      .then(r => {
+        if (!r.ok) throw new Error(`Slot decision HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => {
+        if (!stale && data && typeof data.slotWorthiness === 'number') {
+          setSlotDecision(data as SlotDecision);
+        }
+      })
       .catch(err => console.warn('Slot decision failed:', err))
-      .finally(() => setSlotLoading(false));
+      .finally(() => { if (!stale) setSlotLoading(false); });
+    return () => { stale = true; };
   }, [result]);
 
   // Run shirt color simulation after single-design analysis
   useEffect(() => {
     if (!result || result.mode !== 'single' || !lastBase64Ref.current) return;
+    let stale = false;
     const designBase64 = lastBase64Ref.current;
     const cv = result.report.cloudVision;
     const crs = result.report.crs;
@@ -888,7 +923,10 @@ export default function Home() {
 
       const img = new Image();
       img.src = `data:image/jpeg;base64,${designBase64}`;
-      await new Promise<void>(resolve => { img.onload = () => resolve(); });
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Shirt simulation image failed to load'));
+      });
 
       const padding = 18;
       ctx.drawImage(img, padding, padding, 160 - padding * 2, 160 - padding * 2);
@@ -901,9 +939,10 @@ export default function Home() {
       });
       return res.json() as Promise<ShirtColorResult>;
     }))
-      .then(r => setShirtResults(r))
+      .then(r => { if (!stale) setShirtResults(r); })
       .catch(err => console.warn('Shirt color simulation failed:', err))
-      .finally(() => setShirtLoading(false));
+      .finally(() => { if (!stale) setShirtLoading(false); });
+    return () => { stale = true; };
   }, [result]);
 
   const PLATFORM_LABELS: Record<string, string> = {

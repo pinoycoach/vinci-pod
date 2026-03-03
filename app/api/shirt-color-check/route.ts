@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
+import { stripJsonFences } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30; // Single lightweight Gemini call, no Cloud Vision
 
 const MODEL_ID = 'gemini-2.5-flash';
-
-function stripJsonFences(text: string): string {
-  return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-}
 
 export async function POST(req: NextRequest) {
   try {

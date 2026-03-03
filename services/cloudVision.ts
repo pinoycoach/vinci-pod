@@ -1,14 +1,11 @@
 import type { CloudVisionData } from '@/types/pod';
 
-const VISION_API_KEY = process.env.GOOGLE_CLOUD_VISION_API_KEY;
-const VISION_URL = `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`;
-
-export type { CloudVisionData };
-
 export async function analyzeDesignWithCloudVision(base64Image: string): Promise<CloudVisionData> {
-  if (!VISION_API_KEY) {
+  const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
+  if (!apiKey) {
     throw new Error('GOOGLE_CLOUD_VISION_API_KEY is not set');
   }
+  const visionUrl = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
 
   const body = {
     requests: [{
@@ -24,7 +21,7 @@ export async function analyzeDesignWithCloudVision(base64Image: string): Promise
     }]
   };
 
-  const response = await fetch(VISION_URL, {
+  const response = await fetch(visionUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

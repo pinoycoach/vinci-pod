@@ -72,14 +72,17 @@ export async function POST(req: NextRequest) {
               cloudVisionLabels: r.report.cloudVision?.labels ?? [],
               filename: r.filename
             })
-          }).then(res => res.json())
+          }).then(res => {
+            if (!res.ok) throw new Error(`Slot decision HTTP ${res.status}`);
+            return res.json();
+          })
         )
       );
 
-      // Merge slot decisions back into reports
+      // Merge slot decisions back into reports — only if response has expected shape
       uploadNowResults.forEach((r, i) => {
         const settled = slotDecisions[i];
-        if (settled.status === 'fulfilled') {
+        if (settled.status === 'fulfilled' && typeof settled.value?.slotWorthiness === 'number') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (r.report as any).slotDecision = settled.value;
         }
