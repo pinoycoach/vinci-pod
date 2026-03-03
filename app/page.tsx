@@ -492,7 +492,52 @@ function VoicePanel({ agents }: { agents: PODReport['agents'] }) {
 
 // ─── Slot Decision Panel ──────────────────────────────────────────────────────
 
-function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDecision | null; slotLoading: boolean }) {
+// ─── Cerebro Override helpers (pure client-side, no API) ──────────────────────
+
+const CEREBRO_LEVEL_SCORES: Record<string, number> = {
+  BLUE_OCEAN: 95, MODERATE: 70, SATURATED: 35, OVERCROWDED: 10, UNKNOWN: 55
+};
+
+function cerebroCountToLevel(count: number): string {
+  if (count < 500)   return 'BLUE_OCEAN';
+  if (count < 2000)  return 'MODERATE';
+  if (count < 10000) return 'SATURATED';
+  return 'OVERCROWDED';
+}
+
+function cerebroVerdict(worthiness: number, level: string): string {
+  if (level === 'OVERCROWDED') return 'SKIP';
+  if (worthiness >= 70) return 'GO';
+  if (worthiness >= 50) return 'HOLD';
+  return 'SKIP';
+}
+
+function cerebroUrgency(verdict: string, level: string): string {
+  if (verdict === 'SKIP') return 'SKIP';
+  if (verdict === 'HOLD') return 'WAIT_FOR_SEASON';
+  if (level === 'BLUE_OCEAN') return 'UPLOAD_TODAY';
+  return 'UPLOAD_THIS_WEEK';
+}
+
+interface CerebroResult {
+  keyword: string;
+  count: number;
+  level: string;
+  slotWorthiness: number;
+  verdict: string;
+  urgency: string;
+}
+
+function SlotDecisionPanel({ slotDecision, slotLoading, crs }: {
+  slotDecision: SlotDecision | null;
+  slotLoading: boolean;
+  crs?: number;
+}) {
+  const [cerebroOpen, setCerebroOpen] = useState(false);
+  const [cerebroKeyword, setCerebroKeyword] = useState('');
+  const [cerebroCount, setCerebroCount] = useState('');
+  const [cerebroResult, setCerebroResult] = useState<CerebroResult | null>(null);
+
   if (slotLoading) {
     return (
       <div className="border border-stone-700 bg-stone-900/30 p-4 text-center">
@@ -535,6 +580,18 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
   const uc = urgencyCfg[urgency] ?? urgencyCfg.SKIP;
   const lc = levelCfg[competition.level] ?? levelCfg.UNKNOWN;
 
+  function runCerebroOverride() {
+    const count = parseInt(cerebroCount, 10);
+    if (!cerebroKeyword.trim() || isNaN(count) || count < 0) return;
+    const effectiveCRS = crs ?? slotWorthiness; // slotWorthiness destructured above, crs preferred
+    const level = cerebroCountToLevel(count);
+    const compScore = CEREBRO_LEVEL_SCORES[level] ?? 55;
+    const worth = Math.round(effectiveCRS * 0.6 + compScore * 0.4);
+    const verd = cerebroVerdict(worth, level);
+    const urg = cerebroUrgency(verd, level);
+    setCerebroResult({ keyword: cerebroKeyword.trim(), count, level, slotWorthiness: worth, verdict: verd, urgency: urg });
+  }
+
   return (
     <div className="border border-stone-700 bg-stone-900/30 p-4 space-y-4">
       <div className="text-xs font-mono text-stone-500 tracking-wider">SLOT DECISION</div>
@@ -574,6 +631,75 @@ function SlotDecisionPanel({ slotDecision, slotLoading }: { slotDecision: SlotDe
       <div className="text-xs text-stone-700 font-mono text-right">
         Slot Worthiness = (CRS × 0.6) + (Market Score × 0.4) · Market estimate, not live data
       </div>
+
+      {/* ─── Cerebro Override ─────────────────────────────────────────────── */}
+      <div className="border-t border-stone-800 pt-3">
+        <button
+          onClick={() => { setCerebroOpen(v => !v); setCerebroResult(null); }}
+          className="text-xs font-mono text-stone-600 hover:text-stone-400 transition-colors flex items-center gap-1"
+        >
+          {cerebroOpen ? '▾' : '▸'} Override with Cerebro data
+        </button>
+
+        {cerebroOpen && (
+          <div className="mt-3 space-y-3">
+            <div className="flex gap-2 flex-wrap">
+              <input
+                type="text"
+                placeholder="Cerebro keyword (e.g. trust your government shirt)"
+                value={cerebroKeyword}
+                onChange={e => setCerebroKeyword(e.target.value)}
+                className="flex-1 min-w-0 bg-stone-900 border border-stone-700 text-stone-300 text-xs font-mono px-2 py-1.5 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+              />
+              <input
+                type="number"
+                placeholder="Listing count"
+                value={cerebroCount}
+                onChange={e => setCerebroCount(e.target.value)}
+                min="0"
+                className="w-32 bg-stone-900 border border-stone-700 text-stone-300 text-xs font-mono px-2 py-1.5 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+              />
+              <button
+                onClick={runCerebroOverride}
+                disabled={!cerebroKeyword.trim() || !cerebroCount}
+                className="text-xs font-mono bg-stone-800 hover:bg-stone-700 text-stone-300 px-3 py-1.5 border border-stone-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Recalculate
+              </button>
+            </div>
+
+            {cerebroResult && (() => {
+              const cLevelCfg = levelCfg[cerebroResult.level] ?? levelCfg.UNKNOWN;
+              const cVerdictCfg = verdictCfg[cerebroResult.verdict] ?? verdictCfg.SKIP;
+              const cUrgencyCfg = urgencyCfg[cerebroResult.urgency] ?? urgencyCfg.SKIP;
+              const cWorthColor = cerebroResult.slotWorthiness >= 70 ? 'text-green-400' : cerebroResult.slotWorthiness >= 50 ? 'text-yellow-400' : 'text-red-400';
+              const improved = cerebroResult.slotWorthiness > slotWorthiness;
+              return (
+                <div className="border border-stone-600 bg-stone-900/50 p-3 space-y-2">
+                  <div className="text-xs font-mono text-stone-500 tracking-wider mb-2">CEREBRO FRAME vs GEMINI FRAME</div>
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                    <div className="space-y-1 opacity-50">
+                      <div className="text-stone-500">GEMINI</div>
+                      <div className="text-stone-400 truncate">&ldquo;{competition.searchTerm}&rdquo;</div>
+                      <div className={levelCfg[competition.level]?.cls.split(' ')[0] ?? 'text-stone-400'}>{levelCfg[competition.level]?.label}</div>
+                      <div className={worthColor}>Slot {slotWorthiness}</div>
+                      <div className={verdictCfg[verdict]?.cls.split(' ')[1] ?? 'text-stone-400'}>{verdictCfg[verdict]?.label}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-stone-400">CEREBRO {improved ? '↑' : '↓'}</div>
+                      <div className="text-stone-200 truncate">&ldquo;{cerebroResult.keyword}&rdquo;</div>
+                      <div className={cLevelCfg.cls.split(' ')[0]}>{cLevelCfg.label} · {cerebroResult.count.toLocaleString()} listings</div>
+                      <div className={cWorthColor}>Slot {cerebroResult.slotWorthiness}</div>
+                      <div className={`${cVerdictCfg.cls.split(' ')[1]} font-bold`}>{cVerdictCfg.label} · <span className={cUrgencyCfg.cls}>{cUrgencyCfg.label}</span></div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-stone-700 font-mono mt-2">⚠ Override is manual — not saved to report</div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -602,7 +728,7 @@ function SingleReport({
       <PathwayBadge pathway={report.pathway} />
       <CRSDisplay report={report} />
       <ShirtColorGate results={shirtResults} loading={shirtLoading} />
-      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} />
+      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} crs={report.crs} />
       <ShirtColorPanel agents={report.agents} />
       <NarrativeSection report={report} />
       <CommercialIntelPanel agents={report.agents} />
@@ -636,12 +762,22 @@ function SingleReport({
         <button
           onClick={async () => {
             if (!reportRef.current) return;
-            const html2canvas = (await import('html2canvas')).default;
-            const canvas = await html2canvas(reportRef.current, { backgroundColor: '#0c0a09' });
-            const link = document.createElement('a');
-            link.download = `pod-vinci-${filename.replace(/\.[^.]+$/, '')}-${Date.now()}.png`;
-            link.href = canvas.toDataURL();
-            link.click();
+            try {
+              const html2canvas = (await import('html2canvas')).default;
+              const canvas = await html2canvas(reportRef.current, {
+                backgroundColor: '#0c0a09',
+                useCORS: true,
+                logging: false
+              });
+              const link = document.createElement('a');
+              link.download = `pod-vinci-${filename.replace(/\.[^.]+$/, '')}-${Date.now()}.png`;
+              link.href = canvas.toDataURL('image/png');
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            } catch (err) {
+              console.error('Export failed:', err);
+            }
           }}
           className="text-xs font-mono text-stone-600 hover:text-stone-400 border border-stone-800 hover:border-stone-600 px-3 py-1 transition-colors"
         >
