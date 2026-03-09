@@ -11,7 +11,7 @@ import { VOICE_ANALYZER_PROMPT } from './pod-agents/voiceAnalyzer';
 import type { PODReport, PODNarrative, UploadDecision, CloudVisionData, PathwayDetection, PurchasePathway } from '@/types/pod';
 import { stripJsonFences } from '@/lib/utils';
 
-const MODEL_ID = 'gemini-2.5-flash-001'; // Pinned — prevents silent scoring drift on model updates
+const MODEL_ID = 'gemini-3-flash-preview'; // Pinned — prevents silent scoring drift on model updates
 
 function getAI() {
   return new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });

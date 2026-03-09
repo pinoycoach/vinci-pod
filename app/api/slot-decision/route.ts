@@ -12,7 +12,7 @@ import { stripJsonFences } from '@/lib/utils';
 export const runtime = 'nodejs';
 export const maxDuration = 30; // Two fast text-only Gemini calls, no images
 
-const MODEL_ID = 'gemini-2.5-flash-001'; // Pinned — prevents silent scoring drift on model updates
+const MODEL_ID = 'gemini-3-flash-preview'; // Pinned — prevents silent scoring drift on model updates
 
 function getAI() {
   return new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });
