@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 // html2canvas loaded dynamically on export click to reduce initial bundle (~200KB)
-import type { PODReport, BatchDesignResult, SlotDecision, PathwayDetection, PurchasePathway, CloudVisionData } from '@/types/pod';
+import type { PODReport, BatchDesignResult, SlotDecision, PathwayDetection, PurchasePathway, CloudVisionData, CompetitionLevel } from '@/types/pod';
+import { competitionLevelToScore } from '@/services/competitionCheck';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -116,8 +117,8 @@ function CRSDisplay({ report }: { report: PODReport }) {
   return (
     <div>
       <div className="text-center py-8 border border-stone-700 bg-stone-900/50">
-        <div className="text-xs tracking-widest text-amber-400/60 mb-2 font-mono">COMMERCIAL RESONANCE SCORE</div>
-        <div className={`text-8xl font-light ${crsColor}`}>{report.crs}</div>
+        <div className="text-xs tracking-widest text-amber-400/60 mb-2 font-mono">DESIGN QUALITY SCORE</div>
+        <div className={`text-5xl font-light ${crsColor}`}>{report.crs}</div>
         <div className="text-stone-500 text-sm mb-4">/ 100</div>
         <UploadBadge decision={report.uploadDecision} />
         {report.bestPlatform && (
@@ -128,10 +129,18 @@ function CRSDisplay({ report }: { report: PODReport }) {
       </div>
       {report.memeRubricActive && (
         <div className="border border-yellow-400/20 bg-yellow-400/5 p-3 mt-2 text-xs font-mono space-y-1">
-          <div className="text-yellow-400/80 tracking-wider">⚡ MEME RUBRIC ACTIVE</div>
+          <div className="text-yellow-400/80 tracking-wider flex items-center gap-2">
+            ⚡ MEME RUBRIC ACTIVE
+            {report.pathway?.confidence !== undefined && (
+              <span className="text-yellow-400/50 font-normal">· {report.pathway.confidence}% confidence</span>
+            )}
+            {report.pathway === undefined && (
+              <span className="text-yellow-400/50 font-normal">· user override</span>
+            )}
+          </div>
           <div className="text-stone-400">Scored on: Voice 30% · Scroll-Stop 25% · Niche 20% · Thumbnail 15% · Contrast 10%</div>
           <div className="text-stone-500">Standard gift/identity rubric does not apply to this design type.</div>
-          <div className="text-yellow-400/60">Deploy if Voice 80+ AND Slot Worthiness 75+.</div>
+          <div className="text-yellow-400/60">Deploy if Voice 80+ AND Market-Adjusted Score 75+.</div>
         </div>
       )}
     </div>
@@ -494,9 +503,7 @@ function VoicePanel({ agents }: { agents: PODReport['agents'] }) {
 
 // ─── Cerebro Override helpers (pure client-side, no API) ──────────────────────
 
-const CEREBRO_LEVEL_SCORES: Record<string, number> = {
-  BLUE_OCEAN: 95, MODERATE: 70, SATURATED: 35, OVERCROWDED: 10, UNKNOWN: 55
-};
+// Competition score mapping now imported from competitionCheck.ts (single source of truth)
 
 function cerebroCountToLevel(count: number): string {
   if (count < 500)   return 'BLUE_OCEAN';
@@ -585,7 +592,7 @@ function SlotDecisionPanel({ slotDecision, slotLoading, crs }: {
     if (!cerebroKeyword.trim() || isNaN(count) || count < 0) return;
     const effectiveCRS = crs ?? slotWorthiness; // slotWorthiness destructured above, crs preferred
     const level = cerebroCountToLevel(count);
-    const compScore = CEREBRO_LEVEL_SCORES[level] ?? 55;
+    const compScore = competitionLevelToScore(level as CompetitionLevel);
     const worth = Math.round(effectiveCRS * 0.6 + compScore * 0.4);
     const verd = cerebroVerdict(worth, level);
     const urg = cerebroUrgency(verd, level);
@@ -598,9 +605,9 @@ function SlotDecisionPanel({ slotDecision, slotLoading, crs }: {
 
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-xs font-mono text-stone-600 mb-1">SLOT WORTHINESS</div>
-          <div className={`text-5xl font-light ${worthColor}`}>{slotWorthiness}</div>
-          <div className="text-stone-600 text-xs">/ 100</div>
+          <div className="text-xs tracking-widest text-amber-400/60 mb-1 font-mono">MARKET-ADJUSTED SCORE</div>
+          <div className={`text-8xl font-light ${worthColor}`}>{slotWorthiness}</div>
+          <div className="text-stone-600 text-xs font-mono">/ 100 · Design 60% + Market 40%</div>
         </div>
         <div className="text-right space-y-2">
           <span className={`text-sm font-mono tracking-wider px-3 py-1 border inline-block ${vc.cls}`}>
@@ -726,9 +733,9 @@ function SingleReport({
     <div className="space-y-6" ref={reportRef}>
       <div className="text-stone-500 text-sm font-mono text-center">{filename}</div>
       <PathwayBadge pathway={report.pathway} />
+      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} crs={report.crs} />
       <CRSDisplay report={report} />
       <ShirtColorGate results={shirtResults} loading={shirtLoading} />
-      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} crs={report.crs} />
       <ShirtColorPanel agents={report.agents} />
       <NarrativeSection report={report} />
       <CommercialIntelPanel agents={report.agents} />
@@ -1004,6 +1011,8 @@ export default function Home() {
   const [slotLoading, setSlotLoading] = useState(false);
   const [shirtResults, setShirtResults] = useState<ShirtColorResult[]>([]);
   const [shirtLoading, setShirtLoading] = useState(false);
+  // Rubric override: null = auto-detect, true = force meme weights, false = force standard weights
+  const [forceMemeRubric, setForceMemeRubric] = useState<boolean | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastBase64Ref = useRef<string>('');
   const reportRef = useRef<HTMLDivElement | null>(null);
@@ -1138,7 +1147,7 @@ export default function Home() {
       const res = await fetch('/api/pod-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images, platform })
+        body: JSON.stringify({ images, platform, forceMemeRubric })
       });
       if (!res.ok) {
         const text = await res.text();
@@ -1153,7 +1162,7 @@ export default function Home() {
       setLoading(false);
       setLoadingMsg('');
     }
-  }, [platform]);
+  }, [platform, forceMemeRubric]);
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => analyze(e.target.files);
   const onDrop = (e: React.DragEvent) => { e.preventDefault(); setDragging(false); analyze(e.dataTransfer.files); };
@@ -1191,6 +1200,33 @@ export default function Home() {
                 {label}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Rubric override */}
+        <div>
+          <div className="text-xs font-mono text-stone-500 tracking-wider mb-2">SCORING RUBRIC</div>
+          <div className="flex gap-2 flex-wrap items-center">
+            {(['auto', 'meme', 'standard'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setForceMemeRubric(mode === 'auto' ? null : mode === 'meme')}
+                className={`px-3 py-1.5 text-xs font-mono border transition-colors ${
+                  (mode === 'auto'     && forceMemeRubric === null)  ||
+                  (mode === 'meme'     && forceMemeRubric === true)  ||
+                  (mode === 'standard' && forceMemeRubric === false)
+                    ? 'border-amber-400/60 text-amber-400 bg-amber-900/20'
+                    : 'border-stone-700 text-stone-500 hover:border-stone-500 hover:text-stone-400'
+                }`}
+              >
+                {mode.toUpperCase()}
+              </button>
+            ))}
+            <span className="text-xs text-stone-700 font-mono">
+              {forceMemeRubric === null    && 'Auto-detect from design signals'}
+              {forceMemeRubric === true    && '⚡ Voice 30% · Commercial 25% · Niche 20%'}
+              {forceMemeRubric === false   && 'Niche 23% · Thumbnail 23% · gift/identity weights'}
+            </span>
           </div>
         </div>
 

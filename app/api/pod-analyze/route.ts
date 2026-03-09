@@ -8,9 +8,10 @@ export const maxDuration = 300; // Vercel Pro — supports large batches (20 des
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { images, platform = 'merch' } = body as {
+    const { images, platform = 'merch', forceMemeRubric = null } = body as {
       images: Array<{ filename: string; base64: string }>;
       platform?: string;
+      forceMemeRubric?: boolean | null;
     };
 
     if (!images || !Array.isArray(images) || images.length === 0) {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
 
     // Single design
     if (images.length === 1) {
-      const report = await analyzePODDesign(images[0].base64, platform);
+      const report = await analyzePODDesign(images[0].base64, platform, forceMemeRubric);
       return NextResponse.json({
         mode: 'single',
         filename: images[0].filename,
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
       const batch = images.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(
         batch.map(img =>
-          analyzePODDesign(img.base64, platform)
+          analyzePODDesign(img.base64, platform, forceMemeRubric)
             .then(report => ({ filename: img.filename, report }))
             .catch(err => ({ filename: img.filename, error: (err as Error).message }))
         )

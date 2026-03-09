@@ -11,7 +11,7 @@ import { VOICE_ANALYZER_PROMPT } from './pod-agents/voiceAnalyzer';
 import type { PODReport, PODNarrative, UploadDecision, CloudVisionData, PathwayDetection, PurchasePathway } from '@/types/pod';
 import { stripJsonFences } from '@/lib/utils';
 
-const MODEL_ID = 'gemini-2.5-flash';
+const MODEL_ID = 'gemini-2.5-flash-001'; // Pinned — prevents silent scoring drift on model updates
 
 function getAI() {
   return new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });
@@ -272,7 +272,11 @@ Return ONLY valid JSON with no markdown fences:
   }
 }
 
-export async function analyzePODDesign(imageBase64: string, platform: string = 'merch'): Promise<PODReport> {
+export async function analyzePODDesign(
+  imageBase64: string,
+  platform: string = 'merch',
+  forceMemeRubric: boolean | null = null  // null = auto-detect, true/false = user override
+): Promise<PODReport> {
   const startTime = Date.now();
 
   // Phase 0: Cloud Vision computed foundation
@@ -337,9 +341,12 @@ export async function analyzePODDesign(imageBase64: string, platform: string = '
     voice:       voiceResult.voiceScore as number
   };
 
-  // If pathway is MEME_SELF_PURCHASE, use meme weights — Voice + Commercial are the real signals.
-  // Standard gift/identity weights (Niche 23% + Thumbnail 23%) tank CRS on text-dominant designs.
-  const memeRubricActive = pathway?.pathway === 'MEME_SELF_PURCHASE';
+  // Meme rubric: user override takes priority over auto-detection.
+  // Auto-detection fires on MEME_SELF_PURCHASE pathway from Cloud Vision signals.
+  // forceMemeRubric=true forces meme weights even on gift/identity detections (and vice versa).
+  const memeRubricActive = forceMemeRubric !== null
+    ? forceMemeRubric
+    : pathway?.pathway === 'MEME_SELF_PURCHASE';
   const crs = memeRubricActive
     ? computeMemeCRS(agentScores)
     : computeCRS(agentScores, platform);
