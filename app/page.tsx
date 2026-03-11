@@ -4,6 +4,9 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 // html2canvas loaded dynamically on export click to reduce initial bundle (~200KB)
 import type { PODReport, BatchDesignResult, SlotDecision, PathwayDetection, PurchasePathway, CloudVisionData, CompetitionLevel } from '@/types/pod';
 import { competitionLevelToScore } from '@/services/competitionCheck';
+import type { DNAResult } from '@/services/designDNA';
+import { DNAProximityBadge } from '@/components/DNAProximityBadge';
+import { DNASeedPanel } from '@/components/DNASeedPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -535,10 +538,12 @@ interface CerebroResult {
   urgency: string;
 }
 
-function SlotDecisionPanel({ slotDecision, slotLoading, crs }: {
+function SlotDecisionPanel({ slotDecision, slotLoading, crs, dnaResult, dnaLoading }: {
   slotDecision: SlotDecision | null;
   slotLoading: boolean;
   crs?: number;
+  dnaResult?: DNAResult | null;
+  dnaLoading?: boolean;
 }) {
   const [cerebroOpen, setCerebroOpen] = useState(false);
   const [cerebroKeyword, setCerebroKeyword] = useState('');
@@ -635,6 +640,8 @@ function SlotDecisionPanel({ slotDecision, slotLoading, crs }: {
         </div>
       )}
 
+      <DNAProximityBadge dnaResult={dnaResult ?? null} loading={dnaLoading ?? false} />
+
       <div className="text-xs text-stone-700 font-mono text-right">
         Slot Worthiness = (CRS × 0.6) + (Market Score × 0.4) · Market estimate, not live data
       </div>
@@ -717,6 +724,8 @@ function SingleReport({
   result,
   slotDecision,
   slotLoading,
+  dnaResult,
+  dnaLoading,
   shirtResults,
   shirtLoading,
   reportRef
@@ -724,6 +733,8 @@ function SingleReport({
   result: SingleResult;
   slotDecision: SlotDecision | null;
   slotLoading: boolean;
+  dnaResult: DNAResult | null;
+  dnaLoading: boolean;
   shirtResults: ShirtColorResult[];
   shirtLoading: boolean;
   reportRef: React.RefObject<HTMLDivElement | null>;
@@ -733,7 +744,7 @@ function SingleReport({
     <div className="space-y-6" ref={reportRef}>
       <div className="text-stone-500 text-sm font-mono text-center">{filename}</div>
       <PathwayBadge pathway={report.pathway} />
-      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} crs={report.crs} />
+      <SlotDecisionPanel slotDecision={slotDecision} slotLoading={slotLoading} crs={report.crs} dnaResult={dnaResult} dnaLoading={dnaLoading} />
       <CRSDisplay report={report} />
       <ShirtColorGate results={shirtResults} loading={shirtLoading} />
       <ShirtColorPanel agents={report.agents} />
@@ -1009,6 +1020,8 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [slotDecision, setSlotDecision] = useState<SlotDecision | null>(null);
   const [slotLoading, setSlotLoading] = useState(false);
+  const [dnaResult, setDnaResult] = useState<DNAResult | null>(null);
+  const [dnaLoading, setDnaLoading] = useState(false);
   const [shirtResults, setShirtResults] = useState<ShirtColorResult[]>([]);
   const [shirtLoading, setShirtLoading] = useState(false);
   // Rubric override: null = auto-detect, true = force meme weights, false = force standard weights
@@ -1043,6 +1056,28 @@ export default function Home() {
       })
       .catch(err => console.warn('Slot decision failed:', err))
       .finally(() => { if (!stale) setSlotLoading(false); });
+    return () => { stale = true; };
+  }, [result]);
+
+  // Run Design DNA after single-design analysis
+  useEffect(() => {
+    if (!result || result.mode !== 'single' || !lastBase64Ref.current) return;
+    let stale = false;
+    setDnaLoading(true);
+    setDnaResult(null);
+    const fd = new FormData();
+    fd.append('imageBase64', lastBase64Ref.current);
+    fd.append('mimeType', 'image/jpeg');
+    const nicheKeywords = (result.report.agents.niche as Record<string, unknown>).nicheKeywords as string ?? '';
+    fd.append('nicheText', nicheKeywords);
+    fetch('/api/pod/embed', { method: 'POST', body: fd })
+      .then(r => {
+        if (!r.ok) throw new Error(`DNA embed HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => { if (!stale) setDnaResult(data as DNAResult); })
+      .catch(err => console.warn('DNA embed failed:', err))
+      .finally(() => { if (!stale) setDnaLoading(false); });
     return () => { stale = true; };
   }, [result]);
 
@@ -1277,6 +1312,8 @@ export default function Home() {
                 result={result}
                 slotDecision={slotDecision}
                 slotLoading={slotLoading}
+                dnaResult={dnaResult}
+                dnaLoading={dnaLoading}
                 shirtResults={shirtResults}
                 shirtLoading={shirtLoading}
                 reportRef={reportRef}
@@ -1297,6 +1334,8 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        <DNASeedPanel />
 
       </div>
     </main>
