@@ -6,9 +6,10 @@ export function DNASeedPanel() {
   const [open, setOpen] = useState(false);
   const [namespace, setNamespace] = useState<"winners" | "death_row">("winners");
   const [nicheText, setNicheText] = useState("");
-  const [designName, setDesignName] = useState("");
+  const [title, setTitle] = useState("");
   const [podScore, setPodScore] = useState("");
-  const [market, setMarket] = useState("UK");
+  const [unitsSold, setUnitsSold] = useState("");
+  const [marketplace, setMarketplace] = useState("UK");
   const [outcome, setOutcome] = useState("");
   const [secret, setSecret] = useState("");
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -19,7 +20,7 @@ export function DNASeedPanel() {
 
   function handleFile(file: File) {
     setImageFilename(file.name);
-    if (!designName) setDesignName(file.name.replace(/\.[^.]+$/, ""));
+    if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""));
     // Compress to JPEG, max 1500px — same pipeline as main analyzer to avoid 4.5MB Vercel limit
     const reader = new FileReader();
     reader.onload = () => {
@@ -57,10 +58,11 @@ export function DNASeedPanel() {
     fd.append("mimeType", "image/jpeg");
     fd.append("nicheText", nicheText.trim());
     fd.append("namespace", namespace);
-    fd.append("id", `${designName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`);
-    fd.append("designName", designName || imageFilename);
+    fd.append("id", `${title.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`);
+    fd.append("title", title || imageFilename);
     fd.append("podScore", podScore || "0");
-    fd.append("market", market);
+    fd.append("units_sold", unitsSold || "0");
+    fd.append("marketplace", marketplace);
     fd.append("outcome", outcome.trim() || (namespace === "winners" ? "WINNER" : "ZERO_SALES_KILLED"));
     try {
       const res = await fetch("/api/pod/seed", {
@@ -74,9 +76,10 @@ export function DNASeedPanel() {
       setStatusMsg(`Seeded: ${data.id} → ${data.namespace}`);
       setImageBase64(null);
       setImageFilename("");
-      setDesignName("");
+      setTitle("");
       setNicheText("");
       setPodScore("");
+      setUnitsSold("");
       setOutcome("");
     } catch (err) {
       setStatus("error");
@@ -136,9 +139,19 @@ export function DNASeedPanel() {
                 placeholder="border collie dog mum UK" value={nicheText} onChange={e => setNicheText(e.target.value)} />
             </div>
             <div>
-              <div className="text-xs text-stone-600 font-mono mb-1">Design name</div>
+              <div className="text-xs text-stone-600 font-mono mb-1">Title</div>
               <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
-                placeholder="Border Collie Just Throw It" value={designName} onChange={e => setDesignName(e.target.value)} />
+                placeholder="Border Collie Just Throw It" value={title} onChange={e => setTitle(e.target.value)} />
+            </div>
+            <div>
+              <div className="text-xs text-stone-600 font-mono mb-1">Units sold</div>
+              <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
+                placeholder="500" type="number" value={unitsSold} onChange={e => setUnitsSold(e.target.value)} />
+            </div>
+            <div>
+              <div className="text-xs text-stone-600 font-mono mb-1">Marketplace</div>
+              <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
+                placeholder="UK" value={marketplace} onChange={e => setMarketplace(e.target.value)} />
             </div>
             <div>
               <div className="text-xs text-stone-600 font-mono mb-1">POD score</div>
@@ -146,14 +159,9 @@ export function DNASeedPanel() {
                 placeholder="88" type="number" value={podScore} onChange={e => setPodScore(e.target.value)} />
             </div>
             <div>
-              <div className="text-xs text-stone-600 font-mono mb-1">Market</div>
-              <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
-                placeholder="UK" value={market} onChange={e => setMarket(e.target.value)} />
-            </div>
-            <div className="col-span-2">
               <div className="text-xs text-stone-600 font-mono mb-1">Outcome</div>
               <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
-                placeholder="SOLD_500 · ZERO_SALES_KILLED · etc." value={outcome} onChange={e => setOutcome(e.target.value)} />
+                placeholder="SOLD_500 · MARKET_OG · TRENDING_OG · etc." value={outcome} onChange={e => setOutcome(e.target.value)} />
             </div>
             <div className="col-span-2">
               <div className="text-xs text-stone-600 font-mono mb-1">Admin secret *</div>

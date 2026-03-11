@@ -26,14 +26,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Backward-compat: accept both old field names (designName/market) and new ones (title/marketplace)
     const metadata: DesignMetadata = {
       id: (form.get("id") as string | null) ?? `design-${Date.now()}`,
-      designName: (form.get("designName") as string | null) ?? "Unnamed",
+      title:
+        (form.get("title") as string | null) ??
+        (form.get("designName") as string | null) ??
+        "Unnamed",
       podScore: Number(form.get("podScore") ?? 0),
-      market: (form.get("market") as string | null) ?? "UK",
+      units_sold: Number(form.get("units_sold") ?? 0),
+      marketplace:
+        (form.get("marketplace") as string | null) ??
+        (form.get("market") as string | null) ??
+        "UK",
       niche: (form.get("niche") as string | null) ?? nicheText,
-      outcome: (form.get("outcome") as string | null) ?? "PENDING",
-      dateAdded: new Date().toISOString(),
+      outcome:
+        (form.get("outcome") as string | null) ??
+        (namespace === "winners" ? "WINNER" : "ZERO_SALES_KILLED"),
+      seeded_date: new Date().toISOString(),
     };
 
     await seedDesign(

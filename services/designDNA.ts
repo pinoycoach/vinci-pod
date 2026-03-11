@@ -5,12 +5,13 @@ const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });
 
 export interface DesignMetadata {
   id: string;
-  designName: string;
-  podScore: number;
-  market: string;
-  niche: string;
-  outcome: string;
-  dateAdded: string;
+  title: string;        // display name (was: designName)
+  podScore: number;     // CRS 0–100
+  units_sold: number;   // actual unit sales count
+  marketplace: string;  // "UK" | "US" | "DE" | "global" (was: market)
+  niche: string;        // niche category label e.g. "dog breeds"
+  outcome: string;      // "SOLD_500" | "MARKET_OG" | "TRENDING_OG" | "ZERO_SALES_KILLED"
+  seeded_date: string;  // ISO timestamp (was: dateAdded)
 }
 
 export interface DNAMatch {
@@ -20,12 +21,22 @@ export interface DNAMatch {
   metadata: Record<string, unknown>;
 }
 
+export interface ClosestMatch {
+  title: string;
+  niche: string;
+  units_sold: number;
+  marketplace: string;
+  similarity: number;  // cosine score 0–1, internal only
+  namespace: "winners" | "death_row";
+}
+
 export interface DNAResult {
   dnaScore: number;
   classification: "WINNER_ZONE" | "NEUTRAL" | "DEATH_ROW_ZONE" | "BUILDING";
   winnerCount: number;
   deathRowCount: number;
   topMatches: DNAMatch[];
+  closestMatch: ClosestMatch | null;
 }
 
 export async function embedDesign(
@@ -93,6 +104,7 @@ export async function queryDNA(embedding: number[]): Promise<DNAResult> {
       winnerCount,
       deathRowCount,
       topMatches: allMatches,
+      closestMatch: null,
     };
   }
 
@@ -103,7 +115,33 @@ export async function queryDNA(embedding: number[]): Promise<DNAResult> {
       ? "DEATH_ROW_ZONE"
       : "NEUTRAL";
 
-  return { dnaScore, classification, winnerCount, deathRowCount, topMatches: allMatches };
+  // Extract closest reference design for WINNER_ZONE and DEATH_ROW_ZONE.
+  // Backward-compat: old vectors stored designName/market/dateAdded field names.
+  let closestMatch: ClosestMatch | null = null;
+
+  if (classification === "WINNER_ZONE" && winnerMatches.length > 0) {
+    const top = winnerMatches[0];
+    closestMatch = {
+      title: ((top.metadata.title ?? top.metadata.designName ?? "unknown") as string),
+      niche: ((top.metadata.niche ?? "") as string),
+      units_sold: Number(top.metadata.units_sold ?? 0),
+      marketplace: ((top.metadata.marketplace ?? top.metadata.market ?? "") as string),
+      similarity: top.score,
+      namespace: "winners",
+    };
+  } else if (classification === "DEATH_ROW_ZONE" && deathRowMatches.length > 0) {
+    const top = deathRowMatches[0];
+    closestMatch = {
+      title: ((top.metadata.title ?? top.metadata.designName ?? "unknown") as string),
+      niche: ((top.metadata.niche ?? "") as string),
+      units_sold: Number(top.metadata.units_sold ?? 0),
+      marketplace: ((top.metadata.marketplace ?? top.metadata.market ?? "") as string),
+      similarity: top.score,
+      namespace: "death_row",
+    };
+  }
+
+  return { dnaScore, classification, winnerCount, deathRowCount, topMatches: allMatches, closestMatch };
 }
 
 export async function seedDesign(

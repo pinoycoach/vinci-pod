@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { embedDesign, queryDNA } from "@/services/designDNA";
 
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();

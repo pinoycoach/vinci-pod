@@ -19,7 +19,7 @@ export function DNAProximityBadge({ dnaResult, loading }: Props) {
 
   if (!dnaResult) return null;
 
-  const { classification, winnerCount } = dnaResult;
+  const { classification, winnerCount, closestMatch } = dnaResult;
 
   const config: Record<
     DNAResult["classification"],
@@ -53,12 +53,36 @@ export function DNAProximityBadge({ dnaResult, loading }: Props) {
 
   const { dot, text, border, bg } = config[classification];
 
+  // Build closest match detail string for WINNER_ZONE and DEATH_ROW_ZONE
+  const matchDetail = closestMatch
+    ? [
+        closestMatch.title,
+        closestMatch.units_sold > 0 ? `${closestMatch.units_sold} units` : null,
+        closestMatch.niche || null,
+        closestMatch.marketplace || null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
+
   return (
     <div
-      className={`mt-3 flex items-center gap-2 px-3 py-2 rounded border ${border} ${bg} text-xs font-mono`}
+      className={`mt-3 px-3 py-2 rounded border ${border} ${bg} text-xs font-mono`}
     >
-      <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
-      <span className="text-stone-300">{text}</span>
+      <div className="flex items-center gap-2">
+        <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
+        <span className="text-stone-300">{text}</span>
+      </div>
+      {(classification === "WINNER_ZONE" || classification === "DEATH_ROW_ZONE") &&
+        matchDetail && (
+          <div
+            className={`mt-1 pl-4 text-xs font-mono ${
+              classification === "WINNER_ZONE" ? "text-emerald-500/70" : "text-red-500/70"
+            }`}
+          >
+            {matchDetail}
+          </div>
+        )}
     </div>
   );
 }
