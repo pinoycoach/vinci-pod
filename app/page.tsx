@@ -1069,7 +1069,9 @@ export default function Home() {
     fd.append('imageBase64', lastBase64Ref.current);
     fd.append('mimeType', 'image/jpeg');
     const nicheKeywords = (result.report.agents.niche as Record<string, unknown>).nicheKeywords as string ?? '';
-    fd.append('nicheText', nicheKeywords);
+    const ocrText = result.report.cloudVision?.ocrText ?? '';
+    const nicheText = [nicheKeywords, ocrText].filter(Boolean).join(' ').trim();
+    fd.append('nicheText', nicheText);
     fetch('/api/pod/embed', { method: 'POST', body: fd })
       .then(r => {
         if (!r.ok) throw new Error(`DNA embed HTTP ${r.status}`);

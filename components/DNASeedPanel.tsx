@@ -6,6 +6,7 @@ export function DNASeedPanel() {
   const [open, setOpen] = useState(false);
   const [namespace, setNamespace] = useState<"winners" | "death_row">("winners");
   const [nicheText, setNicheText] = useState("");
+  const [shirtText, setShirtText] = useState("");
   const [title, setTitle] = useState("");
   const [podScore, setPodScore] = useState("");
   const [unitsSold, setUnitsSold] = useState("");
@@ -56,7 +57,8 @@ export function DNASeedPanel() {
     const fd = new FormData();
     fd.append("imageBase64", imageBase64);
     fd.append("mimeType", "image/jpeg");
-    fd.append("nicheText", nicheText.trim());
+    const enrichedNicheText = [nicheText.trim(), shirtText.trim()].filter(Boolean).join(' ');
+    fd.append("nicheText", enrichedNicheText);
     fd.append("namespace", namespace);
     fd.append("id", `${title.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`);
     fd.append("title", title || imageFilename);
@@ -78,6 +80,7 @@ export function DNASeedPanel() {
       setImageFilename("");
       setTitle("");
       setNicheText("");
+      setShirtText("");
       setPodScore("");
       setUnitsSold("");
       setOutcome("");
@@ -142,6 +145,11 @@ export function DNASeedPanel() {
               <div className="text-xs text-stone-600 font-mono mb-1">Title</div>
               <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
                 placeholder="Border Collie Just Throw It" value={title} onChange={e => setTitle(e.target.value)} />
+            </div>
+            <div className="col-span-2">
+              <div className="text-xs text-stone-600 font-mono mb-1">Shirt text (optional)</div>
+              <input className="w-full bg-stone-900 border border-stone-700 px-2 py-1.5 text-xs font-mono text-stone-200 focus:outline-none focus:border-stone-500"
+                placeholder="Just Throw It" value={shirtText} onChange={e => setShirtText(e.target.value)} />
             </div>
             <div>
               <div className="text-xs text-stone-600 font-mono mb-1">Units sold</div>
