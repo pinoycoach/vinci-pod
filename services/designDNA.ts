@@ -37,7 +37,7 @@ export async function embedDesign(
     model: "gemini-embedding-2-preview",
     contents: [
       { inlineData: { data: imageBase64, mimeType } },
-      nicheText,
+      { text: nicheText },
     ],
     config: { outputDimensionality: 1536 },
   });
