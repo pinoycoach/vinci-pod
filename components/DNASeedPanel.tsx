@@ -20,10 +20,26 @@ export function DNASeedPanel() {
   function handleFile(file: File) {
     setImageFilename(file.name);
     if (!designName) setDesignName(file.name.replace(/\.[^.]+$/, ""));
+    // Compress to JPEG, max 1500px — same pipeline as main analyzer to avoid 4.5MB Vercel limit
     const reader = new FileReader();
     reader.onload = () => {
-      const b64 = (reader.result as string).split(",")[1];
-      setImageBase64(b64);
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1500;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const b64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+        setImageBase64(b64);
+      };
+      img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
   }
